@@ -89,8 +89,19 @@ async def plex_test(current_user: dict = Depends(require_authentication)):
 
 @router.post("/plex/sync")
 async def plex_sync(
-    scan: bool = False, current_user: dict = Depends(require_authentication)
+    scan: bool = False,
+    dry_run: bool = False,
+    current_user: dict = Depends(require_authentication),
 ):
+    """Queue a sync. With dry_run, run it here read-only and return what would change."""
+    if dry_run:
+        from src.services.plex_library_sync_service import sync_plex_library
+        from src.services.plex_music_video_service import PlexMusicVideoClient
+
+        if not PlexMusicVideoClient.enabled():
+            raise HTTPException(400, "Plex music video library is not enabled")
+        return await run_in_threadpool(sync_plex_library, dry_run=True)
+
     from src.tasks.arr_tasks import plex_music_video_sync_task
 
     return _queue(plex_music_video_sync_task, scan=scan)

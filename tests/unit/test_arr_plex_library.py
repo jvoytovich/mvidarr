@@ -308,3 +308,22 @@ def test_managed_collections_are_pruned_and_others_left_alone(library):
     titles = {c["title"] for c in fake.collections.values()}
     assert "Artist: Gone" not in titles
     assert "Jacob's favourites" in titles
+
+
+def test_dry_run_reads_plex_but_writes_nothing(library):
+    fake = FakePlex(
+        [
+            "/mnt/blofeld/music-videos/MVidarr/Madonna/Madonna - Vogue.mp4",
+            "/mnt/blofeld/music-videos/MVidarr/Prince/Prince - When Doves Cry.mkv",
+        ]
+    )
+    fake.collections["900"] = {"title": "Artist: Gone", "items": ["100"]}
+    stats = sync_plex_library(client=client_for(fake), dry_run=True)
+    assert [c for c in fake.calls if c[0] != "GET"] == []
+    assert fake.items["100"]["title"] == "file0"
+    assert stats["dry_run"] is True and stats["edited"] == 2
+    assert stats["edit_samples"][0]["title"] == ["file0", "Madonna - Vogue"]
+    assert stats["collection_changes"]["Artist: Gone"] == "delete"
+    assert stats["collection_changes"]["Billboard Year-End 1990"]["created"] is True
+    assert stats["playlists"]["Billboard Year-End Hot 100: 1990"] == "created"
+    assert stats["planned_writes"] > 0

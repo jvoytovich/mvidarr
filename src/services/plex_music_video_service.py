@@ -90,6 +90,9 @@ class PlexMusicVideoClient:
         self.http = http or requests.Session()
         self.timeout = timeout
         self._machine_id: Optional[str] = None
+        # Dry run: reads go to Plex, writes are only recorded in self.planned
+        self.dry_run = False
+        self.planned: List[Tuple[str, str]] = []
 
     # ------------------------------------------------------------ settings
     @classmethod
@@ -121,6 +124,12 @@ class PlexMusicVideoClient:
     ) -> Dict:
         if not self.base_url or not self.token:
             raise PlexError("Plex server URL and token are required")
+        if self.dry_run and method != "GET":
+            self.planned.append((method, path))
+            if method == "POST" and path in ("/library/collections", "/playlists"):
+                fake_key = f"dry-run-{len(self.planned)}"
+                return {"MediaContainer": {"Metadata": [{"ratingKey": fake_key}]}}
+            return {}
         url = self.base_url + path
         headers = {"X-Plex-Token": self.token, "Accept": "application/json"}
         resp = self.http.request(

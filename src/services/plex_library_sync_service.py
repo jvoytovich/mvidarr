@@ -307,10 +307,18 @@ def sync_plex_library(
     scan: bool = False,
     scan_wait_seconds: int = 60,
     client: Optional[PlexMusicVideoClient] = None,
+    dry_run: bool = False,
 ) -> Dict:
-    """Run one full sync. Returns counts for logs and the API."""
+    """
+    Run one full sync. Returns counts for logs and the API.
+
+    With dry_run, Plex is only read: the stats say what would change, with
+    per-collection counts and a sample of title edits, and nothing is written.
+    """
     client = client or PlexMusicVideoClient.from_settings()
+    client.dry_run = dry_run
     stats = {
+        "dry_run": dry_run,
         "items_in_plex": 0,
         "videos_downloaded": 0,
         "matched": 0,
@@ -322,7 +330,10 @@ def sync_plex_library(
         "playlists": {},
         "errors": [],
     }
-    if scan:
+    if dry_run:
+        stats["collection_changes"] = {}
+        stats["edit_samples"] = []
+    if scan and not dry_run:
         for location in client.section_locations():
             try:
                 client._request(
@@ -348,8 +359,18 @@ def sync_plex_library(
         rating_key = str(item["ratingKey"])
         key_for[video_id] = rating_key
         try:
-            if _edit_if_needed(client, state, video_id, item):
+            changes = _edit_if_needed(client, state, video_id, item)
+            if changes:
                 stats["edited"] += 1
+                if dry_run and len(stats["edit_samples"]) < 25:
+                    stats["edit_samples"].append(
+                        {
+                            "file": info["path"],
+                            "title": [item.get("title"), changes.get("title")],
+                            "year": [item.get("year"), changes.get("year")],
+                            "genres": changes.get("genres"),
+                        }
+                    )
         except PlexError as exc:
             stats["errors"].append(f"edit {rating_key}: {exc}")
 
@@ -369,6 +390,8 @@ def sync_plex_library(
                 stats["collections_created"] += 1
             elif result["added"] or result["removed"]:
                 stats["collections_updated"] += 1
+            if dry_run and (result["created"] or result["added"] or result["removed"]):
+                stats["collection_changes"][title] = result
         except PlexError as exc:
             stats["errors"].append(f"collection {title}: {exc}")
 
@@ -379,6 +402,8 @@ def sync_plex_library(
                     f"/library/metadata/{collection['ratingKey']}", method="DELETE"
                 )
                 stats["collections_deleted"] += 1
+                if dry_run:
+                    stats["collection_changes"][title] = "delete"
             except PlexError as exc:
                 stats["errors"].append(f"delete collection {title}: {exc}")
 
@@ -395,8 +420,11 @@ def sync_plex_library(
         except PlexError as exc:
             stats["errors"].append(f"playlist {title}: {exc}")
 
+    if dry_run:
+        stats["planned_writes"] = len(client.planned)
     logger.info(
-        "Plex sync: {matched} of {videos_downloaded} downloaded videos in Plex, "
+        ("Plex sync (dry run): " if dry_run else "Plex sync: ")
+        + "{matched} of {videos_downloaded} downloaded videos in Plex, "
         "{edited} edited, {collections_created} collections created, "
         "{collections_updated} updated, {collections_deleted} deleted".format(**stats)
     )
@@ -405,7 +433,7 @@ def sync_plex_library(
 
 def _edit_if_needed(
     client: PlexMusicVideoClient, state: LibraryState, video_id: int, item: Dict
-) -> bool:
+) -> Dict:
     info = state.videos[video_id]
     title = plex_title(info["artist"], info["title"])
     sort = f"{info['artist_sort']} {a_side(clean_video_title(info['title'], info['artist']))}"
@@ -427,6 +455,6 @@ def _edit_if_needed(
         changes["genres"] = genres
         changes["current_genres"] = current_genres
     if not changes:
-        return False
+        return {}
     client.edit_item(str(item["ratingKey"]), **changes)
-    return True
+    return changes

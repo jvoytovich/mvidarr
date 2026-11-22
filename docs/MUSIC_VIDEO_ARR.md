@@ -106,6 +106,11 @@ Collections starting with `Genre: `, `Decade: ` or `Artist: ` are managed by
 MVidarr and removed when they no longer apply. Other collections are left
 alone.
 
+**Preview Changes** (or `POST /api/arr/plex/sync?dry_run=true`) reads Plex and
+reports what a sync would edit, create, change and delete, without writing
+anything. Run it before the first sync on a library that already has
+collections.
+
 ## Chart lists
 
 With **Billboard Year-End lists** on, a weekly task reads the Wikipedia

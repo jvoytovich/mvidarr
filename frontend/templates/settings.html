@@ -784,6 +784,7 @@ input:checked + .slider:before {
             </div>
             <div class="integration-actions">
                 <button onclick="testPlexMusicVideos()" class="btn btn-info">Test Connection</button>
+                <button onclick="previewPlexMusicVideos()" class="btn btn-secondary">Preview Changes</button>
                 <button onclick="syncPlexMusicVideos()" class="btn btn-secondary">Sync Library Now</button>
             </div>
         </div>
@@ -4153,6 +4154,22 @@ function syncPlexMusicVideos() {
         .then(r => r.json().then(d => ({ ok: r.ok, d })))
         .then(({ ok, d }) => ok ? showSuccess('Plex sync started') : showError('Plex sync failed: ' + (d.detail || 'error')))
         .catch(e => showError('Plex sync failed: ' + e.message));
+}
+
+function previewPlexMusicVideos() {
+    showSuccess('Reading the Plex library...');
+    fetch('/api/arr/plex/sync?dry_run=true', { method: 'POST' })
+        .then(r => r.json().then(d => ({ ok: r.ok, d })))
+        .then(({ ok, d }) => {
+            if (!ok) { showError('Preview failed: ' + (d.detail || 'error')); return; }
+            const changes = d.collection_changes || {};
+            const deleted = Object.keys(changes).filter(t => changes[t] === 'delete');
+            const removed = Object.values(changes).reduce((n, c) => n + (c.removed || 0), 0);
+            showSuccess(`Preview: ${d.matched} of ${d.videos_downloaded} videos found in Plex, ${d.edited} items would be edited, `
+                + `${d.collections_created} collections created, ${d.collections_updated} changed (${removed} items removed), `
+                + `${deleted.length} deleted${deleted.length ? ' (' + deleted.join(', ') + ')' : ''}. Nothing was changed.`);
+        })
+        .catch(e => showError('Preview failed: ' + e.message));
 }
 
 function testIndexers() {
