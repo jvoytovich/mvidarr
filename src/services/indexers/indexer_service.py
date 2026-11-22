@@ -48,7 +48,11 @@ from src.services.indexers.prowlarr import (
     ProwlarrError,
     ProwlarrLimitError,
 )
-from src.services.indexers.release_scoring import ScoredRelease, rank_releases
+from src.services.indexers.release_scoring import (
+    ScoredRelease,
+    rank_releases,
+    release_key,
+)
 from src.services.plex_music_video_service import (
     map_path,
     notify_file_added,
@@ -224,14 +228,18 @@ def search_query(artist: str, title: str) -> str:
     return f"{primary_artist(artist)} {core_title(title)}".strip()
 
 
-def _tried_guids(session, video_id: int) -> List[str]:
-    return [
-        g
-        for (g,) in session.query(IndexerGrab.release_guid).filter(
-            IndexerGrab.video_id == video_id
-        )
-        if g
-    ]
+def _tried_releases(session, video_id: int):
+    """Guids and release keys of every release already grabbed for a video."""
+    guids, keys = [], []
+    rows = session.query(
+        IndexerGrab.release_guid, IndexerGrab.protocol, IndexerGrab.release_title
+    ).filter(IndexerGrab.video_id == video_id)
+    for guid, protocol, release_title in rows:
+        if guid:
+            guids.append(guid)
+        if release_title:
+            keys.append(release_key(protocol, release_title))
+    return guids, keys
 
 
 def search_video(
@@ -245,7 +253,7 @@ def search_video(
             return []
         artist = video.artist.name if video.artist else ""
         title = video.title or ""
-        exclude = _tried_guids(session, video_id)
+        exclude, exclude_keys = _tried_releases(session, video_id)
     query = search_query(artist, title)
     record = IndexerSearch(video_id=video_id, query=query[:500], purpose=purpose)
     scored: List[ScoredRelease] = []
@@ -258,6 +266,7 @@ def search_video(
             min_resolution=config.min_resolution,
             max_size_mb=config.max_size_mb,
             exclude_guids=exclude,
+            exclude_keys=exclude_keys,
         )
         if not config.torrents_enabled or not config.qbittorrent():
             scored = [s for s in scored if s.release.protocol == "usenet"]

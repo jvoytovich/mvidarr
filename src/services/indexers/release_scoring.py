@@ -327,6 +327,17 @@ def score_release(
     return result
 
 
+def release_key(protocol: str, title: str) -> tuple:
+    """Identify a release by protocol and title, ignoring case and punctuation.
+
+    Some indexers (The Pirate Bay through Prowlarr, for one) hand out a new
+    guid for the same torrent on every search, so a guid alone can't stop a
+    failed release from being grabbed again.
+    """
+    words = re.sub(r"[^0-9a-z]+", " ", (title or "").lower()).split()
+    return ((protocol or "").lower(), " ".join(words))
+
+
 def rank_releases(
     releases: List[Release],
     artist: str,
@@ -334,13 +345,20 @@ def rank_releases(
     min_resolution: int = 0,
     max_size_mb: int = 4096,
     exclude_guids=(),
+    exclude_keys=(),
 ) -> List[ScoredRelease]:
-    """All releases scored; accepted ones first, best first."""
+    """All releases scored; accepted ones first, best first.
+
+    Releases whose guid is in exclude_guids, or whose release_key() is in
+    exclude_keys, are left out: they were grabbed for this video before.
+    """
     excluded = set(exclude_guids or ())
+    excluded_keys = set(exclude_keys or ())
     scored = [
         score_release(r, artist, title, min_resolution, max_size_mb)
         for r in releases
         if r.guid not in excluded
+        and release_key(r.protocol, r.title) not in excluded_keys
     ]
     scored.sort(key=lambda s: (s.accepted, s.score), reverse=True)
     return scored

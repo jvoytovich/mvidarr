@@ -298,3 +298,58 @@ def test_torrent_without_peers_is_dropped_after_a_few_hours(env):
     assert grabs[0].status == "failed" and "no peers" in (grabs[0].error or "")
     assert grabs[1].release_title == "Madonna.Vogue.720p.WEB.x264"
     session.close()
+
+
+def test_failed_release_is_not_grabbed_again_under_a_new_guid(env):
+    """The Pirate Bay hands out a new guid on every search; match the title too."""
+    searches = []
+
+    def search(query, **kwargs):
+        searches.append(query)
+        n = len(searches)
+        return [
+            Release(
+                title="Madonna - Vogue (1990) [1080p]",
+                guid=f"https://tpb/description.php?id=1&s={n}",
+                indexer="The Pirate Bay",
+                protocol="torrent",
+                size=90 * MB,
+                seeders=1,
+                magnet_url=f"magnet:?xt=urn:btih:AAA&tr=tracker{n}",
+            ),
+            Release(
+                title="Madonna.Vogue.720p.WEB.x264",
+                guid="https://knaben/2",
+                indexer="Knaben",
+                protocol="torrent",
+                size=90 * MB,
+                seeders=1,
+                magnet_url="magnet:?xt=urn:btih:BBB",
+            ),
+        ]
+
+    env["prowlarr"].search = search
+    svc.try_indexer_first(env["video_id"])
+    tag = next(iter(env["qbit"].states))
+    env["qbit"].states[tag] = ClientStatus(state="failed", message="error")
+    svc.poll_grabs()
+
+    session = env["db"]()
+    grabs = session.query(IndexerGrab).order_by(IndexerGrab.id).all()
+    assert len(searches) == 2  # the retry really searched again
+    assert [g.release_title for g in grabs] == [
+        "Madonna - Vogue (1990) [1080p]",
+        "Madonna.Vogue.720p.WEB.x264",
+    ]
+    session.close()
+
+
+def test_release_key_ignores_case_and_punctuation():
+    from src.services.indexers.release_scoring import release_key
+
+    assert release_key("torrent", "Madonna - Vogue (1990) [1080p]") == release_key(
+        "Torrent", "madonna.vogue.1990.1080p"
+    )
+    assert release_key("usenet", "Madonna-Vogue") != release_key(
+        "torrent", "Madonna-Vogue"
+    )

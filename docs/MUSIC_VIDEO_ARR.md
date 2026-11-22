@@ -31,7 +31,9 @@ Everything here is off until you turn it on in **Settings > Services**.
    continues) into the library, and Plex is asked to scan that one folder.
 5. If the job fails or stalls for 24 hours (3 hours for a torrent that never
    finds a peer), the next-best release is tried
-   (2 releases per video by default). When none is left, the video goes back
+   (2 releases per video by default). A release already grabbed for the video
+   is never grabbed again, matched by guid or by title (some indexers, such as
+   The Pirate Bay, give the same torrent a new guid on every search). When none is left, the video goes back
    to WANTED and the next download run uses **YouTube**.
 
 Searches are budgeted (`indexer_max_searches_per_day`, default 150) and a
