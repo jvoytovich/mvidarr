@@ -205,3 +205,18 @@ def test_adapter_builds_library_paths_and_indexer_flag(tmp_path):
             adapter.unified_service.download_video.call_args.args[0].indexer_first
             is False
         )
+
+
+def test_scheduled_downloads_respect_the_on_off_setting(arr_db):
+    from unittest.mock import patch
+
+    from src.tasks import scheduled_tasks
+
+    from src.services.settings_service import SettingsService
+
+    # Stored in the DB: the task reloads the settings cache first
+    SettingsService.set("auto_download_schedule_enabled", "false")
+    with patch.object(scheduled_tasks, "get_wanted_videos_for_download") as wanted:
+        result = scheduled_tasks.scheduled_downloads_task.run()
+    assert result["queued"] == 0 and "turned off" in result["message"]
+    wanted.assert_not_called()

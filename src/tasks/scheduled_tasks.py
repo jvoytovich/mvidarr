@@ -249,6 +249,19 @@ def scheduled_downloads_task(**kwargs) -> Dict[str, Any]:
     logger.info("Starting scheduled downloads")
 
     try:
+        # The beat entry is static, so honour the on/off setting here. Settings
+        # are cached per worker process; read the current value.
+        SettingsService.reload_cache()
+        if not SettingsService.get_bool("auto_download_schedule_enabled", True):
+            logger.info("Scheduled downloads are turned off")
+            return {
+                "success": True,
+                "message": "Scheduled downloads are turned off",
+                "queued": 0,
+                "failed": 0,
+                "execution_time": 0,
+            }
+
         # Get settings
         max_downloads = SettingsService.get_int("auto_download_max_videos", 50)
         max_concurrent = SettingsService.get_int("download_max_concurrent", 3)
