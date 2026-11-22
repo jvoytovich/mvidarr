@@ -646,7 +646,9 @@ def import_grab(
         video = session.query(Video).filter(Video.id == grab.video_id).first()
         artist = session.query(Artist).filter(Artist.id == video.artist_id).first()
         protocol, purpose = grab.protocol, grab.purpose
-        artist_name, title = artist.name, video.title
+        from src.services.library_import_service import video_credit
+
+        artist_name, title = video_credit(session, video, artist.name), video.title
         old_path = video.local_path if video.status == VideoStatus.DOWNLOADED else None
         youtube_id = video.youtube_id
 

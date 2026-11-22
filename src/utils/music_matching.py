@@ -120,6 +120,19 @@ def artist_key(artist: str) -> str:
     return squash(_drop_the(primary_artist(artist)))
 
 
+def featured_credit(credit: Optional[str], artist: str) -> Optional[str]:
+    """
+    The full credit ('Quincy Jones featuring James Ingram') when it names
+    featured artists and its main artist is `artist`; otherwise None.
+    """
+    if not credit or not artist:
+        return None
+    main, featured = split_featured(credit)
+    if not featured or artist_key(main) != artist_key(artist):
+        return None
+    return re.sub(r"\s+", " ", credit).strip()
+
+
 def clean_video_title(title: str, artist: Optional[str] = None) -> str:
     """
     Turn an upload title into a song title for file names and Plex:

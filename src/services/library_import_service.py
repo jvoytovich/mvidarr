@@ -19,11 +19,12 @@ from typing import Dict, List, Optional, Tuple
 from sqlalchemy import func
 
 from src.database.connection import get_db
-from src.database.models import Artist, Video, VideoStatus
+from src.database.models import Artist, MediaListEntry, Video, VideoStatus
 from src.utils.logger import get_logger
 from src.utils.music_matching import (
     a_side,
     clean_video_title,
+    featured_credit,
     parse_artist_title,
     song_key,
     split_featured,
@@ -136,6 +137,39 @@ def find_or_create_artist(
     return artist
 
 
+def remember_credit(video: Video, credit: Optional[str], artist_name: str) -> None:
+    """Keep a featured credit ('A featuring B') on the video for names and Plex."""
+    credit = featured_credit(credit, artist_name)
+    if not credit:
+        return
+    metadata = (
+        dict(video.video_metadata) if isinstance(video.video_metadata, dict) else {}
+    )
+    if metadata.get("credit") != credit:
+        metadata["credit"] = credit
+        video.video_metadata = metadata
+
+
+def video_credit(session, video: Video, artist_name: str) -> str:
+    """
+    Artist credit for file names and Plex titles: the full credit with
+    featured artists when one is known (on the video or a chart entry),
+    otherwise the artist's name.
+    """
+    metadata = video.video_metadata if isinstance(video.video_metadata, dict) else {}
+    credit = featured_credit(metadata.get("credit"), artist_name)
+    if credit:
+        return credit
+    if video.id:
+        for (entry_artist,) in session.query(MediaListEntry.artist).filter(
+            MediaListEntry.video_id == video.id
+        ):
+            credit = featured_credit(entry_artist, artist_name)
+            if credit:
+                return credit
+    return artist_name
+
+
 def build_song_index(session) -> Dict[str, Video]:
     """song_key -> video for every video that has no file yet."""
     index: Dict[str, Video] = {}
@@ -214,6 +248,7 @@ def import_directory(
                 video = index.pop(key, None)
                 if video:
                     stats["linked_to_wanted"] += 1
+                    main_name = video.artist.name if video.artist else artist_name
                 else:
                     artist = find_or_create_artist(
                         session,
@@ -228,6 +263,8 @@ def import_directory(
                     )
                     session.add(video)
                     stats["created"] += 1
+                    main_name = artist.name
+                remember_credit(video, artist_name, main_name)
                 video.status = VideoStatus.DOWNLOADED
                 video.local_path = path
                 if (

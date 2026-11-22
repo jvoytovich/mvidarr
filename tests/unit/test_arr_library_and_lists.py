@@ -318,3 +318,13 @@ def test_nas_snapshot_and_recycle_folders_are_skipped(tmp_path):
     assert scan_video_files(str(tmp_path)) == [
         str(tmp_path / "Madonna" / "Madonna - Vogue.mp4")
     ]
+
+
+def test_import_keeps_a_featured_credit(arr_db, tmp_path):
+    touch(str(tmp_path / "Dua Lipa" / "Dua Lipa featuring DaBaby - Levitating.mp4"))
+    import_directory(str(tmp_path), dry_run=False)
+    session = arr_db()
+    video = session.query(Video).filter(Video.title == "Levitating").one()
+    assert session.get(Artist, video.artist_id).name == "Dua Lipa"
+    assert video.video_metadata["credit"] == "Dua Lipa featuring DaBaby"
+    session.close()

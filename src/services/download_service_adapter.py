@@ -186,6 +186,23 @@ class DownloadServiceAdapter:
         except OSError:
             pass
 
+    @staticmethod
+    def _credit_for(video_id: Optional[int], artist: str) -> str:
+        """'A featuring B' for the file name when a chart entry or import knows it."""
+        if not video_id:
+            return artist
+        try:
+            from src.database.connection import get_db
+            from src.database.models import Video
+            from src.services.library_import_service import video_credit
+
+            with get_db() as session:
+                video = session.query(Video).filter(Video.id == video_id).first()
+                return video_credit(session, video, artist) if video else artist
+        except Exception as exc:  # noqa: BLE001 - naming must never fail a download
+            logger.warning(f"Could not look up the artist credit: {exc}")
+            return artist
+
     def add_music_video_download(
         self,
         artist: str,
@@ -210,8 +227,9 @@ class DownloadServiceAdapter:
                 folder_name = FilenameCleanup.sanitize_folder_name(artist)
                 filename = None
             else:
-                folder_name = library_folder(artist)
-                filename = library_stem(artist, title)
+                credit = self._credit_for(video_id, artist)
+                folder_name = library_folder(credit)
+                filename = library_stem(credit, title)
             output_path = os.path.join(self.music_videos_path, folder_name)
             os.makedirs(output_path, exist_ok=True)
 

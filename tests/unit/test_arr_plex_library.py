@@ -386,3 +386,56 @@ def test_missing_artist_genres_come_from_musicbrainz(library, arr_db):
     assert artist.genres == ["r&b", "soul", "disco"] and artist.musicbrainz_id == "mb-1"
     session.close()
     assert fill_artist_genres(search=search)["checked"] == 0
+
+
+def test_featured_credit_from_the_chart_is_kept_in_titles_and_file_names(arr_db):
+    from src.services.download_service_adapter import DownloadServiceAdapter
+
+    session = arr_db()
+    quincy = Artist(name="Quincy Jones")
+    session.add(quincy)
+    session.flush()
+    video = Video(
+        artist_id=quincy.id,
+        title="One Hundred Ways",
+        status=VideoStatus.DOWNLOADED,
+        local_path="/media/0 Music Videos/MVidarr/Quincy Jones/Quincy Jones - One Hundred Ways.mp4",
+    )
+    session.add(video)
+    session.flush()
+    chart = MediaList(
+        name="Billboard Year-End Hot 100 1982",
+        source="billboard_year_end",
+        year=1982,
+        collection_title="Billboard Year-End 1982",
+    )
+    session.add(chart)
+    session.flush()
+    session.add(
+        MediaListEntry(
+            list_id=chart.id,
+            rank=50,
+            artist="Quincy Jones featuring James Ingram",
+            title="One Hundred Ways",
+            match_key="k",
+            video_id=video.id,
+        )
+    )
+    session.commit()
+    video_id = video.id
+    session.close()
+
+    fake = FakePlex(
+        [
+            "/mnt/blofeld/music-videos/MVidarr/Quincy Jones/Quincy Jones - One Hundred Ways.mp4"
+        ]
+    )
+    sync_plex_library(client=client_for(fake))
+    assert fake.items["100"]["title"] == (
+        "Quincy Jones featuring James Ingram - One Hundred Ways"
+    )
+    assert fake.items["100"]["titleSort"] == "Quincy Jones One Hundred Ways"
+    assert DownloadServiceAdapter._credit_for(video_id, "Quincy Jones") == (
+        "Quincy Jones featuring James Ingram"
+    )
+    assert DownloadServiceAdapter._credit_for(None, "Quincy Jones") == "Quincy Jones"

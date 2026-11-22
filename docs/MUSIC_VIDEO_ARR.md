@@ -66,8 +66,10 @@ New downloads are saved as
 <music_videos_path>/<Artist>/<Artist> - <Title>.jpg   (poster for Plex)
 ```
 
-Featured artists stay in the file name but not the folder
-(`Dua Lipa/Dua Lipa featuring DaBaby - Levitating.mp4`). Set
+Featured artists stay in the file name and the Plex title but not the folder
+(`Dua Lipa/Dua Lipa featuring DaBaby - Levitating.mp4`). The credit comes
+from the chart entry or the imported file name; the artist itself is the main
+artist, so `Artist: Dua Lipa` collects every video she leads. Set
 `download_filename_format` to `legacy` for the original `Artist/Title.ext`.
 
 ### Importing files you already have

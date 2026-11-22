@@ -23,6 +23,7 @@ See `docs/MUSIC_VIDEO_ARR.md`. Everything is off until enabled in Settings > Ser
 - YouTube downloads are capped at `max_concurrent_downloads` at a time per process (previously every dispatched video started at once).
 - New Plex collections appear only in the Collections tab by default (`plex_mv_collection_mode`); the mode is set on creation only, so a mode changed in Plex is kept.
 - Titles keep their apostrophes ("Somebody's Knockin'", "'65 Love Affair"); only wrapping double quotes are dropped. File and folder names never start with a dot, which Plex treats as hidden.
+- Featured credits ("Quincy Jones featuring James Ingram") from chart entries and imported file names are kept in file names and Plex titles; the artist record stays the main artist.
 - The scheduled download task now honours `auto_download_schedule_enabled` (the static beat entry ignored it).
 - The library import drops leading track numbers and trailing release tags from file names and skips NAS snapshot/recycle folders (`@...`, `#...`). Releases whose name has a bracketed source phrase ("(Truth Or Dare 1991)") are rejected.
 

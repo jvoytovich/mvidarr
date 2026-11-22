@@ -35,7 +35,12 @@ from src.services.plex_music_video_service import (
 )
 from src.services.settings_service import SettingsService
 from src.utils.logger import get_logger
-from src.utils.music_matching import a_side, clean_video_title, split_featured
+from src.utils.music_matching import (
+    a_side,
+    clean_video_title,
+    featured_credit,
+    split_featured,
+)
 
 logger = get_logger("mvidarr.plex_library_sync")
 
@@ -168,6 +173,12 @@ class LibraryState:
                     "id": video.id,
                     "artist_id": artist.id,
                     "artist": artist.name,
+                    # Full credit with featured artists, for the title
+                    "credit": featured_credit(
+                        metadata.get("credit") if isinstance(metadata, dict) else None,
+                        artist.name,
+                    )
+                    or artist.name,
                     "artist_sort": artist.sort_name or sort_name(artist.name),
                     "artist_monitored": bool(artist.monitored),
                     "title": video.title or "",
@@ -194,6 +205,12 @@ class LibraryState:
                 ranked = []
                 for entry in entries:
                     ranked.append((entry.rank, entry.video_id))
+                    info = state.videos.get(entry.video_id)
+                    if info and info["credit"] == info["artist"]:
+                        info["credit"] = (
+                            featured_credit(entry.artist, info["artist"])
+                            or info["artist"]
+                        )
                     if media_list.year:
                         state.charts[entry.video_id].append(
                             (chart_name, media_list.year, entry.rank)
@@ -440,8 +457,9 @@ def _edit_if_needed(
     client: PlexMusicVideoClient, state: LibraryState, video_id: int, item: Dict
 ) -> Dict:
     info = state.videos[video_id]
-    title = plex_title(info["artist"], info["title"])
-    sort = f"{info['artist_sort']} {a_side(clean_video_title(info['title'], info['artist']))}"
+    title = plex_title(info["credit"], info["title"])
+    song = a_side(clean_video_title(info["title"], info["credit"]))
+    sort = f"{info['artist_sort']} {song}"
     year = state.year_for(video_id)
     summary = state.summary_for(video_id)
     genres = state.genres_for(video_id)
