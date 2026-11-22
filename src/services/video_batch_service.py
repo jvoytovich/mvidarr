@@ -257,9 +257,23 @@ def resolve_video_url(video, session, timeout: int = 30) -> Optional[str]:
                 video.youtube_id = match["video_id"]
         except Exception:  # noqa: BLE001
             pass
+        # Record the choice: Plex and the upgrade search read video_type, and
+        # an unofficial clip's summary names who uploaded it
         if match["kind"] == "unofficial" and not video.video_type:
             video.video_type = "unofficial_clip"
-        elif match["kind"] == "official" and video.video_type == "unofficial_clip":
+            metadata = (
+                dict(video.video_metadata)
+                if isinstance(video.video_metadata, dict)
+                else {}
+            )
+            if match.get("channel"):
+                metadata["uploader"] = match["channel"]
+                video.video_metadata = metadata
+        elif match["kind"] == "official" and video.video_type in (
+            None,
+            "",
+            "unofficial_clip",
+        ):
             video.video_type = "official_music_video"
         session.commit()
         logger.info(f"Resolved video URL for '{video.title}': {match['url']}")

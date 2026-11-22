@@ -71,6 +71,32 @@ class TestResolveVideoUrlSkipsImvdbPlaceholder:
         assert result == "https://www.youtube.com/watch?v=xyz789abcde"
         assert video.url == "https://www.youtube.com/watch?v=xyz789abcde"
         assert video.youtube_id == "xyz789abcde"
+        assert video.video_type == "official_music_video"
+
+    def test_unofficial_pick_is_flagged_with_its_uploader(self):
+        video = MagicMock(
+            url=None,
+            youtube_url=None,
+            youtube_id=None,
+            video_metadata=None,
+            video_type=None,
+        )
+        video.artist.name = "Van Halen"
+        video.title = "Jump"
+        session = MagicMock()
+        session.query.return_value.filter.return_value.first.return_value = None
+        match = {
+            "url": "https://www.youtube.com/watch?v=abcdefghijk",
+            "video_id": "abcdefghijk",
+            "kind": "unofficial",
+            "title": "Van Halen - Jump (TV)",
+            "channel": "oldtv",
+            "score": 40,
+        }
+        with patch("src.services.youtube_matcher.find_music_video", return_value=match):
+            resolve_video_url(video, session, timeout=5)
+        assert video.video_type == "unofficial_clip"
+        assert video.video_metadata == {"uploader": "oldtv"}
 
     def test_imvdb_placeholder_falls_through_to_youtube_url_before_searching(self):
         video = MagicMock(

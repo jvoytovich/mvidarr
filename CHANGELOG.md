@@ -26,6 +26,7 @@ See `docs/MUSIC_VIDEO_ARR.md`. Everything is off until enabled in Settings > Ser
 - Featured credits ("Quincy Jones featuring James Ingram") from chart entries and imported file names are kept in file names and Plex titles; the artist record stays the main artist.
 - YouTube downloads go to the configured `music_videos_path`. The download adapter is created at import time, often before the database is up, and kept the `data/musicvideos` fallback for the life of the process; the path is now read for each download.
 - A torrent that never finds a peer (qBittorrent `metaDL`/`stalledDL` at 0%) is dropped after `indexer_torrent_dead_hours` (default 3) and the next release is tried, instead of waiting the full 24-hour stall timeout.
+- A YouTube pick is recorded on the video: `official_music_video`, or `unofficial_clip` with the uploader's channel (previously an official pick left `video_type` empty).
 - The scheduled download task now honours `auto_download_schedule_enabled` (the static beat entry ignored it).
 - The library import drops leading track numbers and trailing release tags from file names and skips NAS snapshot/recycle folders (`@...`, `#...`). Releases whose name has a bracketed source phrase ("(Truth Or Dare 1991)") are rejected.
 
