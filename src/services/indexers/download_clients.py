@@ -251,6 +251,7 @@ class QbittorrentClient:
                 else "downloading"
             ),
             progress=progress,
+            message=state,  # raw qBittorrent state, e.g. metaDL, stalledDL
         )
 
     def torrent_hash(self, tag: str) -> Optional[str]:

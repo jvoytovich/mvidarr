@@ -29,7 +29,8 @@ Everything here is off until you turn it on in **Settings > Services**.
 4. A poll task (every 2 minutes) watches the job. When it finishes, the
    largest video file is moved (Usenet) or hard-linked (torrents, so seeding
    continues) into the library, and Plex is asked to scan that one folder.
-5. If the job fails or stalls for 24 hours, the next-best release is tried
+5. If the job fails or stalls for 24 hours (3 hours for a torrent that never
+   finds a peer), the next-best release is tried
    (2 releases per video by default). When none is left, the video goes back
    to WANTED and the next download run uses **YouTube**.
 
@@ -152,6 +153,7 @@ remembers the ids it rejected. Disable the script's timers afterwards.
 | `indexer_min_resolution` | 480 | Lowest release resolution accepted |
 | `indexer_max_grabs_per_video` | 2 | Releases tried before YouTube |
 | `indexer_stall_hours` | 24 | Give up on a stuck job |
+| `indexer_torrent_dead_hours` | 3 | Give up on a torrent that never found a peer |
 | `indexer_upgrades_enabled`, `indexer_upgrade_searches_per_day` | true, 25 | Upgrades |
 | `plex_mv_enabled` | false | Manage the Plex Music Videos library |
 | `plex_server_url`, `plex_token` | | Plex |

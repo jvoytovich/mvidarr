@@ -45,15 +45,37 @@ class DownloadServiceAdapter:
         )
 
     def _load_settings(self):
-        """Load settings that affect download behavior"""
-        self.music_videos_path = settings.get("music_videos_path", "data/musicvideos")
-        self.cookies_path = settings.get(
-            "youtube_cookies_path", "data/cookies/youtube_cookies.txt"
+        """Create the library folder if the database already knows it."""
+        try:
+            os.makedirs(self.music_videos_path, exist_ok=True)
+        except OSError as exc:
+            logger.warning(f"Could not create {self.music_videos_path}: {exc}")
+
+    # The module-level instance is created at import time, often before the
+    # database is up, so these are read from the settings on every use rather
+    # than once in __init__ (which silently fell back to data/musicvideos).
+    # A value set on the instance (tests) wins over the setting.
+    @property
+    def music_videos_path(self) -> str:
+        override = self.__dict__.get("_music_videos_path")
+        return override or settings.get("music_videos_path", "") or "data/musicvideos"
+
+    @music_videos_path.setter
+    def music_videos_path(self, value: str) -> None:
+        self.__dict__["_music_videos_path"] = value
+
+    @property
+    def cookies_path(self) -> str:
+        override = self.__dict__.get("_cookies_path")
+        return (
+            override
+            or settings.get("youtube_cookies_path", "")
+            or "data/cookies/youtube_cookies.txt"
         )
 
-        # Ensure paths exist
-        if not os.path.exists(self.music_videos_path):
-            os.makedirs(self.music_videos_path, exist_ok=True)
+    @cookies_path.setter
+    def cookies_path(self, value: str) -> None:
+        self.__dict__["_cookies_path"] = value
 
     def _restore_cookies_from_database(self):
         """Restore YouTube cookies from database to filesystem on startup"""

@@ -272,3 +272,29 @@ def test_upgrade_replaces_a_low_resolution_youtube_copy(env):
     assert (
         svc.search_upgrades()["searched"] == 0
     )  # imported from an indexer: not a candidate
+
+
+def test_torrent_without_peers_is_dropped_after_a_few_hours(env):
+    from datetime import datetime, timedelta
+
+    env["prowlarr"].releases = [
+        rel("Madonna.Vogue.1080p.WEB.x264", protocol="torrent", seeders=1),
+        rel("Madonna.Vogue.720p.WEB.x264", protocol="torrent", seeders=1),
+    ]
+    svc.try_indexer_first(env["video_id"])
+    tag = next(iter(env["qbit"].states))
+    env["qbit"].states[tag] = ClientStatus(state="queued", progress=0, message="metaDL")
+    assert svc.poll_grabs()["failed"] == 0  # too early to give up
+
+    session = env["db"]()
+    grab = session.query(IndexerGrab).one()
+    grab.created_at = datetime.utcnow() - timedelta(hours=4)
+    session.commit()
+    session.close()
+    assert svc.poll_grabs()["failed"] == 1
+
+    session = env["db"]()
+    grabs = session.query(IndexerGrab).order_by(IndexerGrab.id).all()
+    assert grabs[0].status == "failed" and "no peers" in (grabs[0].error or "")
+    assert grabs[1].release_title == "Madonna.Vogue.720p.WEB.x264"
+    session.close()

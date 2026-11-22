@@ -24,6 +24,8 @@ See `docs/MUSIC_VIDEO_ARR.md`. Everything is off until enabled in Settings > Ser
 - New Plex collections appear only in the Collections tab by default (`plex_mv_collection_mode`); the mode is set on creation only, so a mode changed in Plex is kept.
 - Titles keep their apostrophes ("Somebody's Knockin'", "'65 Love Affair"); only wrapping double quotes are dropped. File and folder names never start with a dot, which Plex treats as hidden.
 - Featured credits ("Quincy Jones featuring James Ingram") from chart entries and imported file names are kept in file names and Plex titles; the artist record stays the main artist.
+- YouTube downloads go to the configured `music_videos_path`. The download adapter is created at import time, often before the database is up, and kept the `data/musicvideos` fallback for the life of the process; the path is now read for each download.
+- A torrent that never finds a peer (qBittorrent `metaDL`/`stalledDL` at 0%) is dropped after `indexer_torrent_dead_hours` (default 3) and the next release is tried, instead of waiting the full 24-hour stall timeout.
 - The scheduled download task now honours `auto_download_schedule_enabled` (the static beat entry ignored it).
 - The library import drops leading track numbers and trailing release tags from file names and skips NAS snapshot/recycle folders (`@...`, `#...`). Releases whose name has a bracketed source phrase ("(Truth Or Dare 1991)") are rejected.
 

@@ -236,6 +236,11 @@ def init_default_settings():
         ("indexer_min_resolution", "480", "Lowest release resolution accepted"),
         ("indexer_max_grabs_per_video", "2", "Releases tried per video"),
         ("indexer_stall_hours", "24", "Give up on a grab after this many hours"),
+        (
+            "indexer_torrent_dead_hours",
+            "3",
+            "Give up on a torrent that found no peers",
+        ),
         ("indexer_upgrades_enabled", "true", "Replace YouTube copies with releases"),
         ("indexer_upgrade_searches_per_day", "25", "Upgrade searches per day"),
         # Chart lists

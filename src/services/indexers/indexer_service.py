@@ -124,6 +124,10 @@ class IndexerConfig:
         self.max_size_mb = SettingsService.get_int("indexer_max_size_mb", 4096)
         self.max_grabs = SettingsService.get_int("indexer_max_grabs_per_video", 2)
         self.stall_hours = SettingsService.get_int("indexer_stall_hours", 24)
+        # A torrent that never found a peer (metaDL/stalledDL at 0%) is dead
+        self.torrent_dead_hours = SettingsService.get_int(
+            "indexer_torrent_dead_hours", 3
+        )
         self.path_mappings = parse_path_mappings(get("indexer_path_mappings", ""))
         self.music_videos_path = get("music_videos_path", "data/musicvideos")
 
@@ -437,7 +441,23 @@ def poll_grabs(config: Optional[IndexerConfig] = None) -> Dict:
             stats["failed"] += 1
         else:
             age = datetime.utcnow() - (grab.created_at or datetime.utcnow())
-            if age > timedelta(hours=config.stall_hours):
+            no_peers = (
+                grab.protocol == "torrent"
+                and not status.progress
+                and (status.message or "").startswith(("metaDL", "stalledDL"))
+            )
+            if no_peers and age > timedelta(hours=config.torrent_dead_hours):
+                try:
+                    client.remove(grab.client_id, delete_files=True)
+                except Exception:  # noqa: BLE001
+                    pass
+                _fail_grab(
+                    grab.id,
+                    f"no peers after {config.torrent_dead_hours} h ({status.message})",
+                    config,
+                )
+                stats["failed"] += 1
+            elif age > timedelta(hours=config.stall_hours):
                 try:
                     client.remove(
                         grab.client_id, delete_files=grab.protocol == "usenet"

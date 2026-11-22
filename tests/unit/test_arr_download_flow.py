@@ -220,3 +220,15 @@ def test_scheduled_downloads_respect_the_on_off_setting(arr_db):
         result = scheduled_tasks.scheduled_downloads_task.run()
     assert result["queued"] == 0 and "turned off" in result["message"]
     wanted.assert_not_called()
+
+
+def test_library_path_is_read_when_downloading_not_at_import(arr_db, tmp_path):
+    """The module-level adapter is built before the DB is up; it must not keep
+    the data/musicvideos fallback."""
+    from src.services.download_service_adapter import DownloadServiceAdapter
+
+    adapter = DownloadServiceAdapter.__new__(DownloadServiceAdapter)
+    set_settings(music_videos_path=str(tmp_path / "library"))
+    assert adapter.music_videos_path == str(tmp_path / "library")
+    set_settings(music_videos_path="")
+    assert adapter.music_videos_path == "data/musicvideos"
