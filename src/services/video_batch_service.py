@@ -184,6 +184,20 @@ def _is_imvdb_placeholder(url: str) -> bool:
     return "imvdb.com/video/" in url
 
 
+def _indexer_will_search(video, session) -> bool:
+    """True when the indexer step (Prowlarr) will look for this video first."""
+    try:
+        from src.services.indexers.indexer_service import IndexerConfig, should_search
+
+        config = IndexerConfig()
+        if not config.usable:
+            return False
+        ok, _ = should_search(session, video, config, "wanted")
+        return ok
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def resolve_video_url(video, session, timeout: int = 30) -> Optional[str]:
     """
     Helper function to resolve video URL using yt-dlp search
@@ -212,46 +226,50 @@ def resolve_video_url(video, session, timeout: int = 30) -> Optional[str]:
         if not video.youtube_url.endswith("?v="):
             return video.youtube_url
 
+    artist_name = str(video.artist.name) if video.artist else ""
+    video_title = str(video.title) if video.title is not None else ""
+    if not artist_name or not video_title:
+        return None
     try:
-        artist_name = video.artist.name if video.artist else "Unknown Artist"
-        # Ensure title is a string (fix for integer title issue)
-        video_title = str(video.title) if video.title is not None else "Unknown"
-        search_query = f"{artist_name} {video_title}"
-        logger.info(f"Searching for video URL: {search_query}")
+        from src.services.youtube_matcher import find_music_video
 
-        # Use yt-dlp to search YouTube
-        cmd = [
-            get_ytdlp_path(),  # Use the best available version
-            "--dump-json",
-            "--no-download",
-            "--playlist-items",
-            "1",
-            f"ytsearch1:{search_query}",
-        ]
-
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-
-        if result.returncode == 0 and result.stdout:
-            video_info = json.loads(result.stdout.strip())
-            resolved_url = video_info.get("webpage_url") or video_info.get("url")
-
-            if resolved_url:
-                # Update video with resolved URL
-                video.url = resolved_url
-                if "id" in video_info:
-                    video.youtube_id = video_info["id"]
-                session.commit()
-                logger.info(f"Resolved video URL for '{video.title}': {resolved_url}")
-                return resolved_url
-            else:
-                logger.warning(f"No URL found in video info for '{video.title}'")
-        else:
-            logger.error(f"yt-dlp search failed for '{search_query}': {result.stderr}")
-
-    except subprocess.TimeoutExpired:
-        logger.error(f"yt-dlp search timed out for '{search_query}'")
+        exclude = []
+        if isinstance(video.video_metadata, dict):
+            exclude = video.video_metadata.get("rejected_youtube_ids") or []
+        match = find_music_video(
+            artist_name, video_title, exclude_ids=exclude, timeout=timeout
+        )
+        if not match:
+            logger.warning(
+                f"No usable YouTube upload for {artist_name} - {video_title}"
+            )
+            return None
+        video.url = match["url"]
+        video.youtube_url = match["url"]
+        try:
+            # youtube_id is unique: another row may already own this upload
+            taken = (
+                session.query(Video.id)
+                .filter(Video.youtube_id == match["video_id"], Video.id != video.id)
+                .first()
+            )
+            if not taken:
+                video.youtube_id = match["video_id"]
+        except Exception:  # noqa: BLE001
+            pass
+        if match["kind"] == "unofficial" and not video.video_type:
+            video.video_type = "unofficial_clip"
+        elif match["kind"] == "official" and video.video_type == "unofficial_clip":
+            video.video_type = "official_music_video"
+        session.commit()
+        logger.info(f"Resolved video URL for '{video.title}': {match['url']}")
+        return match["url"]
     except Exception as e:
         logger.error(f"Error resolving video URL for '{video.title}': {e}")
+        try:
+            session.rollback()
+        except Exception:  # noqa: BLE001
+            pass
 
     return None
 
@@ -348,10 +366,15 @@ def download_all_wanted_videos_internal(
                         failed_count += 1
                         continue
 
-                    # Resolve video URL using helper function
-                    video_url = resolve_video_url(video, session)
+                    # Usenet/torrent first: the download thread searches the
+                    # indexers and only resolves a YouTube URL if that fails
+                    indexer_first = _indexer_will_search(video, session)
+                    if indexer_first:
+                        video_url = video.url or video.youtube_url or ""
+                    else:
+                        video_url = resolve_video_url(video, session)
 
-                    if not video_url:
+                    if not video_url and not indexer_first:
                         results.append(
                             {
                                 "video_id": video_id,

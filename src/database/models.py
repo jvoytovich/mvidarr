@@ -1278,3 +1278,143 @@ class WizardState(Base):
 
     def __repr__(self):
         return f"<WizardState(id={self.id}, status='{self.status.value}', current_step='{self.current_step.value}', completion={self.get_completion_percentage()}%)>"
+
+
+class IndexerSearch(Base):
+    """One Prowlarr search, kept for the daily search budget and re-search spacing"""
+
+    __tablename__ = "indexer_searches"
+
+    id = Column(Integer, primary_key=True)
+    video_id = Column(
+        Integer, ForeignKey("videos.id", ondelete="CASCADE"), nullable=True
+    )
+    query = Column(String(500), nullable=False)
+    purpose = Column(String(20), nullable=False, default="wanted")  # wanted/upgrade
+    results_count = Column(Integer, default=0)
+    accepted_count = Column(Integer, default=0)
+    outcome = Column(String(30), nullable=True)  # grabbed/no_match/error/budget
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index("idx_indexer_search_video", "video_id"),
+        Index("idx_indexer_search_created", "created_at"),
+        {"extend_existing": True},
+    )
+
+
+class IndexerGrab(Base):
+    """A release sent to SABnzbd or qBittorrent for one video"""
+
+    __tablename__ = "indexer_grabs"
+
+    id = Column(Integer, primary_key=True)
+    video_id = Column(
+        Integer, ForeignKey("videos.id", ondelete="CASCADE"), nullable=False
+    )
+    purpose = Column(String(20), nullable=False, default="wanted")  # wanted/upgrade
+    release_title = Column(String(500), nullable=False)
+    release_guid = Column(String(1000), nullable=True)
+    indexer = Column(String(255), nullable=True)
+    protocol = Column(String(20), nullable=False)  # usenet/torrent
+    client = Column(String(30), nullable=False)  # sabnzbd/qbittorrent
+    client_id = Column(String(255), nullable=True)  # nzo_id / torrent hash
+    size = Column(Integer, nullable=True)
+    resolution = Column(Integer, nullable=True)
+    score = Column(Integer, nullable=True)
+    # grabbed -> downloading -> completed -> imported, or failed
+    status = Column(String(20), nullable=False, default="grabbed")
+    error = Column(Text, nullable=True)
+    download_path = Column(String(1000), nullable=True)
+    imported_path = Column(String(1000), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    completed_at = Column(DateTime, nullable=True)
+
+    __table_args__ = (
+        Index("idx_indexer_grab_video", "video_id"),
+        Index("idx_indexer_grab_status", "status"),
+        {"extend_existing": True},
+    )
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "video_id": self.video_id,
+            "purpose": self.purpose,
+            "release_title": self.release_title,
+            "indexer": self.indexer,
+            "protocol": self.protocol,
+            "client": self.client,
+            "size": self.size,
+            "resolution": self.resolution,
+            "score": self.score,
+            "status": self.status,
+            "error": self.error,
+            "imported_path": self.imported_path,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "completed_at": (
+                self.completed_at.isoformat() if self.completed_at else None
+            ),
+        }
+
+
+class MediaList(Base):
+    """An external list of songs (e.g. a Billboard Year-End chart) to collect"""
+
+    __tablename__ = "media_lists"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), nullable=False, unique=True)
+    source = Column(String(50), nullable=False)  # billboard_year_end, manual, ...
+    year = Column(Integer, nullable=True)
+    source_url = Column(String(500), nullable=True)
+    enabled = Column(Boolean, default=True)
+    auto_add_wanted = Column(Boolean, default=True)  # create WANTED videos
+    collection_title = Column(String(255), nullable=True)
+    collection_sort_title = Column(String(255), nullable=True)
+    playlist_title = Column(String(255), nullable=True)  # ordered by rank
+    last_refreshed = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    entries = relationship(
+        "MediaListEntry",
+        back_populates="media_list",
+        cascade="all, delete-orphan",
+        order_by="MediaListEntry.rank",
+    )
+
+    __table_args__ = (
+        Index("idx_media_list_source_year", "source", "year"),
+        {"extend_existing": True},
+    )
+
+
+class MediaListEntry(Base):
+    """One ranked song on a MediaList, linked to the Video that fills it"""
+
+    __tablename__ = "media_list_entries"
+
+    id = Column(Integer, primary_key=True)
+    list_id = Column(
+        Integer, ForeignKey("media_lists.id", ondelete="CASCADE"), nullable=False
+    )
+    rank = Column(Integer, nullable=False)
+    artist = Column(String(500), nullable=False)
+    title = Column(String(500), nullable=False)
+    match_key = Column(String(500), nullable=False)
+    video_id = Column(
+        Integer, ForeignKey("videos.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    media_list = relationship("MediaList", back_populates="entries")
+
+    __table_args__ = (
+        Index("idx_media_list_entry_list", "list_id"),
+        Index("idx_media_list_entry_video", "video_id"),
+        Index("idx_media_list_entry_key", "match_key"),
+        {"extend_existing": True},
+    )

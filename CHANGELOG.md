@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added: Usenet first, a Plex Music Videos library, chart lists (fork)
+See `docs/MUSIC_VIDEO_ARR.md`. Everything is off until enabled in Settings > Services.
+- **Usenet/torrent first**: a wanted video is searched on Prowlarr (category 3020) before YouTube. Releases are scored on artist/title words, resolution and protocol; live, compilation, lyric and audio releases are rejected. Usenet goes to SABnzbd, torrents (fallback) to qBittorrent. A poll task imports finished downloads into the library and tries the next release on failure; when none is left the video goes back to WANTED for YouTube. Daily search budget, 14-day re-search gap, daily upgrade search that replaces lower-resolution YouTube copies and unofficial clips. New tables `indexer_searches`, `indexer_grabs`.
+- **Plex Music Videos library** (movie-type, Personal Media agent): files are saved as `Artist/Artist - Title.ext` with a `.jpg` poster; Plex scans only the folder a new file lands in; a sync task sets title, sort title, year, genres and summary and maintains collections (one per chart list, `Genre:`, `Decade:`, `Artist:`, unofficial clips) and chart-order playlists.
+- **Chart lists**: Billboard Year-End Hot 100 (1956 onward) from Wikipedia as lists on a new Lists page; missing songs become WANTED videos under unmonitored artists. One-time takeover of the homelab Billboard script's state. New tables `media_lists`, `media_list_entries`.
+- **In-place library import** (`POST /api/arr/library/import`): registers existing files without moving them, fills matching WANTED videos, new artists unmonitored.
+- New API under `/api/arr`, new Celery tasks in `src/tasks/arr_tasks.py`, `ytmusicapi==1.12.4` dependency.
+
+### Changed (fork)
+- YouTube URL resolution now picks the official music video (YouTube Music OMV flag, else channel + title scoring) instead of the first search hit; fan uploads are used only as a fallback and flagged `unofficial_clip`.
+- A YouTube bot check or HTTP 429 pauses all YouTube downloads for `youtube_cooldown_hours` (default 6) and requeues the video instead of failing it. Age-restricted uploads are treated as a dead URL (another upload is tried) and never pause downloads.
+- YouTube downloads are capped at `max_concurrent_downloads` at a time per process (previously every dispatched video started at once).
+
 Weekly Dependabot sweep (2026-11-16): consolidates five of seven open Dependabot PRs (#592, #593, #594, #596, #597). Zero open Dependabot/code-scanning alerts and pip-audit clean on all three requirements files before and after.
 
 ### Security

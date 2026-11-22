@@ -716,6 +716,188 @@ input:checked + .slider:before {
         </div>
         
         <div class="settings-section">
+            <h2>Plex Music Videos Library</h2>
+            <p class="section-description">A movie-type Plex library (Personal Media agent) that holds the music video files. MVidarr scans only the folder a new video lands in, sets "Artist - Title", year and genres, and keeps the list, genre, decade and artist collections up to date.</p>
+            <div class="form-group">
+                <label for="plex_mv_enabled">Manage the Plex Music Videos library:</label>
+                <select id="plex_mv_enabled" name="plex_mv_enabled">
+                    <option value="false">Disabled</option>
+                    <option value="true">Enabled</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="plex_server_url">Plex Server URL:</label>
+                <input type="text" id="plex_server_url" name="plex_server_url" placeholder="http://plex:32400">
+            </div>
+            <div class="form-group">
+                <label for="plex_token">Plex Token:</label>
+                <input type="password" id="plex_token" name="plex_token" autocomplete="off">
+            </div>
+            <div class="form-group">
+                <label for="plex_mv_section_name">Library name:</label>
+                <input type="text" id="plex_mv_section_name" name="plex_mv_section_name" value="Music Videos">
+            </div>
+            <div class="form-group">
+                <label for="plex_mv_section_id">Library section id (optional, overrides the name):</label>
+                <input type="text" id="plex_mv_section_id" name="plex_mv_section_id" placeholder="9">
+            </div>
+            <div class="form-group">
+                <label for="plex_mv_path_mappings">Path mappings (MVidarr path=Plex path, separate with ;):</label>
+                <input type="text" id="plex_mv_path_mappings" name="plex_mv_path_mappings" placeholder="/media/0 Music Videos=/mnt/blofeld/music-videos">
+                <small class="form-help">Needed when Plex sees the library folder under a different path than MVidarr does.</small>
+            </div>
+            <div class="form-group">
+                <label for="plex_mv_collections_lists">Collections and playlists for chart lists:</label>
+                <select id="plex_mv_collections_lists" name="plex_mv_collections_lists">
+                    <option value="true">Yes</option>
+                    <option value="false">No</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="plex_mv_collections_genre">"Genre: ..." collections:</label>
+                <select id="plex_mv_collections_genre" name="plex_mv_collections_genre">
+                    <option value="true">Yes</option>
+                    <option value="false">No</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="plex_mv_collections_decade">"Decade: ..." collections:</label>
+                <select id="plex_mv_collections_decade" name="plex_mv_collections_decade">
+                    <option value="true">Yes</option>
+                    <option value="false">No</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="plex_mv_collections_artist">"Artist: ..." collections:</label>
+                <select id="plex_mv_collections_artist" name="plex_mv_collections_artist">
+                    <option value="true">Yes</option>
+                    <option value="false">No</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="plex_mv_artist_collection_min">Videos an artist needs for an artist collection:</label>
+                <input type="number" id="plex_mv_artist_collection_min" name="plex_mv_artist_collection_min" min="1" max="50" value="2">
+            </div>
+            <div class="form-group">
+                <label for="plex_mv_unofficial_collection">Collection for unofficial clips to review:</label>
+                <input type="text" id="plex_mv_unofficial_collection" name="plex_mv_unofficial_collection" value="Unofficial clips (review)">
+            </div>
+            <div class="integration-actions">
+                <button onclick="testPlexMusicVideos()" class="btn btn-info">Test Connection</button>
+                <button onclick="syncPlexMusicVideos()" class="btn btn-secondary">Sync Library Now</button>
+            </div>
+        </div>
+
+        <div class="settings-section">
+            <h2>Usenet and Torrents (Prowlarr)</h2>
+            <p class="section-description">Before YouTube, MVidarr searches your Prowlarr indexers for the music video (category 3020), sends Usenet releases to SABnzbd and torrents to qBittorrent, and imports the finished file. YouTube is only used when no release fits. A higher-resolution release later replaces a YouTube copy.</p>
+            <div class="form-group">
+                <label for="indexer_enabled">Search indexers first:</label>
+                <select id="indexer_enabled" name="indexer_enabled">
+                    <option value="false">Disabled</option>
+                    <option value="true">Enabled</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="prowlarr_url">Prowlarr URL:</label>
+                <input type="text" id="prowlarr_url" name="prowlarr_url" placeholder="http://prowlarr:9696">
+            </div>
+            <div class="form-group">
+                <label for="prowlarr_api_key">Prowlarr API Key:</label>
+                <input type="password" id="prowlarr_api_key" name="prowlarr_api_key" autocomplete="off">
+            </div>
+            <div class="form-group">
+                <label for="sabnzbd_url">SABnzbd URL:</label>
+                <input type="text" id="sabnzbd_url" name="sabnzbd_url" placeholder="http://sabnzbd:8080">
+            </div>
+            <div class="form-group">
+                <label for="sabnzbd_api_key">SABnzbd API Key:</label>
+                <input type="password" id="sabnzbd_api_key" name="sabnzbd_api_key" autocomplete="off">
+            </div>
+            <div class="form-group">
+                <label for="sabnzbd_category">SABnzbd category:</label>
+                <input type="text" id="sabnzbd_category" name="sabnzbd_category" value="musicvideos">
+            </div>
+            <div class="form-group">
+                <label for="indexer_torrents_enabled">Use torrents when no Usenet release fits:</label>
+                <select id="indexer_torrents_enabled" name="indexer_torrents_enabled">
+                    <option value="true">Yes</option>
+                    <option value="false">No</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="qbittorrent_url">qBittorrent URL:</label>
+                <input type="text" id="qbittorrent_url" name="qbittorrent_url" placeholder="http://qbittorrent:8080">
+            </div>
+            <div class="form-group">
+                <label for="qbittorrent_username">qBittorrent username:</label>
+                <input type="text" id="qbittorrent_username" name="qbittorrent_username" autocomplete="off">
+            </div>
+            <div class="form-group">
+                <label for="qbittorrent_password">qBittorrent password:</label>
+                <input type="password" id="qbittorrent_password" name="qbittorrent_password" autocomplete="off">
+            </div>
+            <div class="form-group">
+                <label for="qbittorrent_category">qBittorrent category:</label>
+                <input type="text" id="qbittorrent_category" name="qbittorrent_category" value="musicvideos">
+            </div>
+            <div class="form-group">
+                <label for="indexer_path_mappings">Download client path mappings (client path=MVidarr path, separate with ;):</label>
+                <input type="text" id="indexer_path_mappings" name="indexer_path_mappings" placeholder="/downloads=/data/usenet">
+                <small class="form-help">Leave empty when MVidarr sees the download folders at the same paths as SABnzbd and qBittorrent.</small>
+            </div>
+            <div class="form-group">
+                <label for="indexer_max_searches_per_day">Searches per day (indexer API budget):</label>
+                <input type="number" id="indexer_max_searches_per_day" name="indexer_max_searches_per_day" min="1" max="5000" value="150">
+            </div>
+            <div class="form-group">
+                <label for="indexer_min_resolution">Lowest resolution to accept (480 accepts DVD rips):</label>
+                <input type="number" id="indexer_min_resolution" name="indexer_min_resolution" min="0" max="2160" value="480">
+            </div>
+            <div class="form-group">
+                <label for="indexer_upgrades_enabled">Replace YouTube copies with better releases:</label>
+                <select id="indexer_upgrades_enabled" name="indexer_upgrades_enabled">
+                    <option value="true">Yes</option>
+                    <option value="false">No</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="indexer_upgrade_searches_per_day">Upgrade searches per day:</label>
+                <input type="number" id="indexer_upgrade_searches_per_day" name="indexer_upgrade_searches_per_day" min="0" max="1000" value="25">
+            </div>
+            <div class="integration-actions">
+                <button onclick="testIndexers()" class="btn btn-info">Test Prowlarr and Download Clients</button>
+                <a href="/lists" class="btn btn-primary">Grabs and Lists</a>
+            </div>
+        </div>
+
+        <div class="settings-section">
+            <h2>Chart Lists</h2>
+            <p class="section-description">Billboard Year-End Hot 100 lists from Wikipedia, one per year from 1956. Songs without a video become wanted videos (artists stay unmonitored), and each year becomes a Plex collection and a chart-order playlist.</p>
+            <div class="form-group">
+                <label for="billboard_lists_enabled">Billboard Year-End lists:</label>
+                <select id="billboard_lists_enabled" name="billboard_lists_enabled">
+                    <option value="false">Disabled</option>
+                    <option value="true">Enabled</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="billboard_first_year">First year:</label>
+                <input type="number" id="billboard_first_year" name="billboard_first_year" min="1956" max="2100" value="1956">
+            </div>
+            <div class="form-group">
+                <label for="lists_auto_add_wanted">Add missing list songs as wanted videos:</label>
+                <select id="lists_auto_add_wanted" name="lists_auto_add_wanted">
+                    <option value="true">Yes</option>
+                    <option value="false">No</option>
+                </select>
+            </div>
+            <div class="integration-actions">
+                <a href="/lists" class="btn btn-primary">Open Lists</a>
+            </div>
+        </div>
+
+        <div class="settings-section">
             <h2>Metadata Services</h2>
             <p class="section-description">Configure third-party metadata providers for enhanced artist information</p>
             
@@ -1032,6 +1214,24 @@ input:checked + .slider:before {
                 <small class="help-text">Comma-separated list of language codes (e.g., en.*, es, fr). Use 'en.*' to match any English variant.</small>
             </div>
             
+            <div class="form-group">
+                <label for="download_filename_format">File names:</label>
+                <select id="download_filename_format" name="download_filename_format">
+                    <option value="artist_title">Artist/Artist - Title.ext (Plex music video library)</option>
+                    <option value="legacy">Artist/Title.ext (original MVidarr)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="download_write_thumbnail">Save the YouTube thumbnail as the Plex poster (.jpg):</label>
+                <select id="download_write_thumbnail" name="download_write_thumbnail">
+                    <option value="true">Yes</option>
+                    <option value="false">No</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="youtube_cooldown_hours">Pause YouTube downloads after a bot check (hours):</label>
+                <input type="number" id="youtube_cooldown_hours" name="youtube_cooldown_hours" min="0" max="48" value="6">
+            </div>
             <div class="form-group">
                 <label for="max_concurrent_downloads">Max Concurrent Downloads:</label>
                 <input type="number" id="max_concurrent_downloads" name="max_concurrent_downloads" min="1" max="10">
@@ -3933,6 +4133,39 @@ function syncLastfmHistory() {
         console.error('Error syncing Last.fm history:', error);
         showError('Last.fm history sync failed: ' + error.message);
     });
+}
+
+function testPlexMusicVideos() {
+    fetch('/api/arr/plex/test', { method: 'POST' })
+        .then(r => r.json())
+        .then(d => {
+            if (d.success) {
+                showSuccess(`Plex OK: library ${d.section_id} with ${d.items} items (${(d.locations || []).join(', ')})`);
+            } else {
+                showError('Plex test failed: ' + (d.error || d.detail || 'unknown error') + '. Save settings first.');
+            }
+        })
+        .catch(e => showError('Plex test failed: ' + e.message));
+}
+
+function syncPlexMusicVideos() {
+    fetch('/api/arr/plex/sync?scan=false', { method: 'POST' })
+        .then(r => r.json().then(d => ({ ok: r.ok, d })))
+        .then(({ ok, d }) => ok ? showSuccess('Plex sync started') : showError('Plex sync failed: ' + (d.detail || 'error')))
+        .catch(e => showError('Plex sync failed: ' + e.message));
+}
+
+function testIndexers() {
+    fetch('/api/arr/indexer/test', { method: 'POST' })
+        .then(r => r.json())
+        .then(d => {
+            const part = (name, x) => !x.configured ? `${name}: not configured`
+                : x.ok ? `${name}: OK${x.version ? ' (' + x.version + ')' : ''}${x.category && x.category_exists === false ? ', category "' + x.category + '" missing' : ''}${x.indexers !== undefined ? ', ' + x.usenet + ' Usenet / ' + x.torrent + ' torrent indexers' : ''}`
+                : `${name}: ${x.error}`;
+            const text = [part('Prowlarr', d.prowlarr), part('SABnzbd', d.sabnzbd), part('qBittorrent', d.qbittorrent)].join(' | ');
+            (d.usable ? showSuccess : showError)(text + (d.usable ? '' : ' | Save settings and enable indexers first.'));
+        })
+        .catch(e => showError('Indexer test failed: ' + e.message));
 }
 
 function testLidarrIntegration() {

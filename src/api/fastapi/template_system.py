@@ -76,6 +76,7 @@ class AsyncTemplateSystem:
                 "frontend.settings": "/settings",
                 "frontend.jobs": "/jobs",
                 "frontend.mvtv": "/mvtv",
+                "frontend.lists": "/lists",
                 # Detail pages
                 "frontend.video_detail": "/video",
                 "frontend.artist_detail": "/artist",
@@ -663,6 +664,16 @@ class FastAPITemplateRoutes:
         }
         return await self.template_system.render_response(
             "settings.html", request, context
+        )
+
+    async def lists(self, request: Request) -> HTMLResponse:
+        """Chart lists (Billboard Year-End) and indexer activity"""
+        context = {
+            "page_title": "Lists",
+            "page_description": "Chart lists, Usenet/torrent grabs and the Plex library",
+        }
+        return await self.template_system.render_response(
+            "lists.html", request, context
         )
 
     # Service Integration pages

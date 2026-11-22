@@ -35,6 +35,7 @@ celery_app = Celery(
         "src.jobs.download_processor_task",
         "src.jobs.wizard_tasks",  # Wizard video indexing tasks
         "src.tasks.scheduled_tasks",  # Scheduler V2 tasks (v0.10.1)
+        "src.tasks.arr_tasks",  # Indexers, Plex Music Videos library, chart lists
     ],
 )
 
@@ -47,6 +48,7 @@ celery_app.conf.update(
         "src.jobs.image_processing_tasks.*": {"queue": "image_processing"},
         "src.jobs.ffmpeg_processing_tasks.*": {"queue": "ffmpeg_processing"},
         "src.tasks.scheduled_tasks.*": {"queue": "scheduler"},  # Scheduler V2 (v0.10.1)
+        "src.tasks.arr_tasks.*": {"queue": "scheduler"},
     },
     # Queue definitions
     task_queues=(
@@ -119,6 +121,30 @@ celery_app.conf.update(
         "playlist-sync": {
             "task": "src.tasks.scheduled_tasks.playlist_sync_task",
             "schedule": timedelta(hours=6),  # Sync monitored playlists every 6 hours
+            "options": {"queue": "scheduler"},
+        },
+        # Usenet/torrent grabs: import finished downloads
+        "indexer-poll": {
+            "task": "src.tasks.arr_tasks.indexer_poll_task",
+            "schedule": timedelta(minutes=2),
+            "options": {"queue": "scheduler", "expires": 110},
+        },
+        # Better copies of YouTube-sourced videos
+        "indexer-upgrades": {
+            "task": "src.tasks.arr_tasks.indexer_upgrade_task",
+            "schedule": timedelta(hours=24),
+            "options": {"queue": "scheduler"},
+        },
+        # Plex Music Videos library: metadata, collections, playlists
+        "plex-music-video-sync": {
+            "task": "src.tasks.arr_tasks.plex_music_video_sync_task",
+            "schedule": timedelta(minutes=30),
+            "options": {"queue": "scheduler", "expires": 1700},
+        },
+        # Billboard Year-End lists (a new year appears in December)
+        "media-lists-refresh": {
+            "task": "src.tasks.arr_tasks.media_lists_refresh_task",
+            "schedule": timedelta(days=7),
             "options": {"queue": "scheduler"},
         },
     },

@@ -17,6 +17,7 @@ from src.services.unified_download_service import (
 )
 from src.utils.filename_cleanup import FilenameCleanup
 from src.utils.logger import get_logger
+from src.utils.music_matching import library_folder, library_stem
 
 logger = get_logger("mvidarr.download_adapter")
 
@@ -202,10 +203,23 @@ class DownloadServiceAdapter:
         Maps to the new unified service while maintaining the same API
         """
         try:
-            # Create output directory
-            folder_name = FilenameCleanup.sanitize_folder_name(artist)
+            # Library layout: <music_videos_path>/<Artist>/<Artist> - <Title>.<ext>
+            # ("legacy" keeps the original <Artist>/<Title>.<ext> naming)
+            naming = settings.get("download_filename_format", "artist_title")
+            if naming == "legacy":
+                folder_name = FilenameCleanup.sanitize_folder_name(artist)
+                filename = None
+            else:
+                folder_name = library_folder(artist)
+                filename = library_stem(artist, title)
             output_path = os.path.join(self.music_videos_path, folder_name)
             os.makedirs(output_path, exist_ok=True)
+
+            # Usenet/torrent first unless this is a specific-format re-download
+            # (quality upgrade of a YouTube source) or the caller opted out
+            indexer_first = bool(
+                kwargs.get("indexer_first", True) and not format_string and video_id
+            )
 
             # Determine anti-detection level based on settings
             anti_detection_level = self._get_anti_detection_level()
@@ -222,6 +236,8 @@ class DownloadServiceAdapter:
                 output_path=output_path,
                 cookies_path=self._get_working_cookies_path(),
                 anti_detection=anti_detection_level,
+                filename=filename,
+                indexer_first=indexer_first,
             )
 
             # Start download using unified service
@@ -282,7 +298,13 @@ class DownloadServiceAdapter:
             download_entry = self.active_downloads[download_id]
 
             # Update status
-            if result.success:
+            if getattr(result, "handed_off", False):
+                download_entry["status"] = "handed_off"
+                download_entry["message"] = result.error_message
+                logger.info(
+                    f"Download {download_id} handed off: {result.error_message}"
+                )
+            elif result.success:
                 download_entry["status"] = "completed"
                 download_entry["file_path"] = result.file_path
                 download_entry["file_size"] = result.file_size

@@ -176,6 +176,62 @@ def init_default_settings():
             "Spotify OAuth redirect URI",
         ),
         ("ui_theme", "default", "User interface theme selection"),
+        # Library layout and YouTube behaviour
+        (
+            "download_filename_format",
+            "artist_title",
+            "artist_title: Artist/Artist - Title.ext; legacy: Artist/Title.ext",
+        ),
+        ("download_write_thumbnail", "true", "Save thumbnail .jpg next to videos"),
+        ("youtube_cooldown_hours", "6", "Pause YouTube downloads after a bot check"),
+        # Plex Music Videos library (movie-type section, Personal Media agent)
+        ("plex_mv_enabled", "false", "Manage the Plex Music Videos library"),
+        ("plex_mv_section_name", "Music Videos", "Plex music video library name"),
+        ("plex_mv_section_id", "", "Plex music video library section id"),
+        ("plex_mv_path_mappings", "", "local=plex path prefixes, ';' separated"),
+        ("plex_mv_collections_lists", "true", "Collections/playlists for lists"),
+        ("plex_mv_collections_genre", "true", "Genre collections"),
+        ("plex_mv_collections_decade", "true", "Decade collections"),
+        ("plex_mv_collections_artist", "true", "Artist collections"),
+        (
+            "plex_mv_artist_collection_min",
+            "2",
+            "Videos needed for an artist collection",
+        ),
+        ("plex_mv_genre_min_items", "3", "Videos needed for a genre collection"),
+        (
+            "plex_mv_unofficial_collection",
+            "Unofficial clips (review)",
+            "Collection for unofficial clips",
+        ),
+        # Usenet/torrent indexers via Prowlarr
+        ("indexer_enabled", "false", "Search Prowlarr before YouTube"),
+        ("prowlarr_url", "", "Prowlarr URL"),
+        ("prowlarr_api_key", "", "Prowlarr API key"),
+        ("sabnzbd_url", "", "SABnzbd URL"),
+        ("sabnzbd_api_key", "", "SABnzbd API key"),
+        ("sabnzbd_category", "musicvideos", "SABnzbd category"),
+        (
+            "indexer_torrents_enabled",
+            "true",
+            "Use torrents when no Usenet release fits",
+        ),
+        ("qbittorrent_url", "", "qBittorrent URL"),
+        ("qbittorrent_username", "", "qBittorrent username"),
+        ("qbittorrent_password", "", "qBittorrent password"),
+        ("qbittorrent_category", "musicvideos", "qBittorrent category"),
+        ("indexer_path_mappings", "", "client=local path prefixes, ';' separated"),
+        ("indexer_max_searches_per_day", "150", "Prowlarr searches per day"),
+        ("indexer_research_days", "14", "Days before a video is searched again"),
+        ("indexer_min_resolution", "480", "Lowest release resolution accepted"),
+        ("indexer_max_grabs_per_video", "2", "Releases tried per video"),
+        ("indexer_stall_hours", "24", "Give up on a grab after this many hours"),
+        ("indexer_upgrades_enabled", "true", "Replace YouTube copies with releases"),
+        ("indexer_upgrade_searches_per_day", "25", "Upgrade searches per day"),
+        # Chart lists
+        ("billboard_lists_enabled", "false", "Billboard Year-End Hot 100 lists"),
+        ("billboard_first_year", "1956", "First Billboard Year-End year"),
+        ("lists_auto_add_wanted", "true", "Add missing list songs as wanted"),
     ]
 
     try:

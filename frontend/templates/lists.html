@@ -1,0 +1,173 @@
+{% extends "base.html" %}
+
+{% block title %}Lists - MVidarr{% endblock %}
+
+{% block content %}
+<div class="youtube-container lists-page">
+    <h1>Lists</h1>
+    <p class="page-description">Chart lists become collections and chart-order playlists in the Plex Music Videos library. Songs without a video are searched on Usenet first, then torrents, then YouTube.</p>
+
+    <div class="settings-section">
+        <h2>Status</h2>
+        <div id="arrStatus" class="lists-status">Loading...</div>
+        <div class="integration-actions">
+            <button class="btn btn-primary" onclick="refreshBillboard()">Fetch Billboard lists</button>
+            <button class="btn btn-secondary" onclick="linkLists()">Link list songs to videos</button>
+            <button class="btn btn-secondary" onclick="syncPlex(false)">Sync Plex library</button>
+            <button class="btn btn-secondary" onclick="syncPlex(true)">Scan and sync Plex library</button>
+            <button class="btn btn-secondary" id="clearCooldownBtn" onclick="clearCooldown()" style="display:none">Resume YouTube downloads</button>
+        </div>
+    </div>
+
+    <div class="settings-section">
+        <h2>Chart lists</h2>
+        <div class="table-responsive">
+            <table class="lists-table">
+                <thead>
+                    <tr><th>List</th><th>Songs</th><th>Downloaded</th><th>Wanted</th><th>Downloading</th><th>Failed</th><th></th></tr>
+                </thead>
+                <tbody id="listsBody"><tr><td colspan="7">Loading...</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="settings-section" id="listDetail" style="display:none">
+        <h2 id="listDetailTitle"></h2>
+        <div class="table-responsive">
+            <table class="lists-table">
+                <thead><tr><th>#</th><th>Artist</th><th>Title</th><th>Status</th><th>Quality</th><th></th></tr></thead>
+                <tbody id="listDetailBody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="settings-section">
+        <h2>Usenet and torrent grabs</h2>
+        <div class="table-responsive">
+            <table class="lists-table">
+                <thead><tr><th>When</th><th>Video</th><th>Release</th><th>Source</th><th>Status</th></tr></thead>
+                <tbody id="grabsBody"><tr><td colspan="5">Loading...</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<style>
+.lists-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.lists-table th, .lists-table td { padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border-color, #333); text-align: left; vertical-align: top; }
+.lists-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.lists-status { line-height: 1.7; }
+.lists-page .badge-state { padding: 0.1rem 0.45rem; border-radius: 0.6rem; font-size: 0.78rem; background: var(--bg-tertiary, #2a2a2a); }
+.lists-page .badge-state.downloaded, .lists-page .badge-state.imported { color: #4caf50; }
+.lists-page .badge-state.failed { color: #f44336; }
+.lists-page .badge-state.wanted { color: #ffb300; }
+</style>
+
+<script>
+function esc(value) {
+    const div = document.createElement('div');
+    div.textContent = value == null ? '' : String(value);
+    return div.innerHTML;
+}
+
+function toast(message, type) {
+    if (typeof window.showToast === 'function') { window.showToast(message, type || 'info'); }
+}
+
+async function api(path, options) {
+    const response = await fetch(path, Object.assign({ credentials: 'same-origin', headers: { 'Content-Type': 'application/json' } }, options || {}));
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) { throw new Error(data.detail || data.error || ('HTTP ' + response.status)); }
+    return data;
+}
+
+async function loadStatus() {
+    try {
+        const data = await api('/api/arr/status');
+        const idx = data.indexers || {};
+        const grabs = Object.entries(idx.grabs || {}).map(([k, v]) => `${esc(k)} ${v}`).join(', ') || 'none yet';
+        const cooldown = data.youtube_cooldown_seconds || 0;
+        document.getElementById('clearCooldownBtn').style.display = cooldown ? '' : 'none';
+        document.getElementById('arrStatus').innerHTML =
+            `<div>Usenet/torrent search: <strong>${idx.usable ? 'on' : (idx.enabled ? 'enabled but not fully configured' : 'off')}</strong>` +
+            ` &middot; searches today ${idx.searches_today || 0} of ${idx.daily_budget || 0}${idx.limit_hit_today ? ' (an indexer limit was hit)' : ''}</div>` +
+            `<div>Grabs: ${grabs}</div>` +
+            `<div>Plex Music Videos library: <strong>${data.plex_music_videos_enabled ? 'on' : 'off'}</strong></div>` +
+            `<div>YouTube: <strong>${cooldown ? 'paused for ' + Math.ceil(cooldown / 60) + ' min (bot check)' : 'downloading'}</strong></div>`;
+    } catch (e) {
+        document.getElementById('arrStatus').textContent = 'Could not load status: ' + e.message;
+    }
+}
+
+async function loadLists() {
+    const body = document.getElementById('listsBody');
+    try {
+        const data = await api('/api/arr/lists');
+        if (!data.lists.length) {
+            body.innerHTML = '<tr><td colspan="7">No lists yet. Turn on Billboard lists in Settings &gt; Services, then fetch them.</td></tr>';
+            return;
+        }
+        body.innerHTML = data.lists.map(l =>
+            `<tr><td>${esc(l.name)}</td><td class="num">${l.entries}</td><td class="num">${l.downloaded}</td>` +
+            `<td class="num">${l.wanted}</td><td class="num">${l.downloading}</td><td class="num">${l.failed}</td>` +
+            `<td><button class="btn btn-sm btn-secondary" onclick="showList(${l.id})">Songs</button></td></tr>`).join('');
+    } catch (e) {
+        body.innerHTML = `<tr><td colspan="7">Could not load lists: ${esc(e.message)}</td></tr>`;
+    }
+}
+
+async function showList(id) {
+    const data = await api('/api/arr/lists/' + id);
+    document.getElementById('listDetail').style.display = '';
+    document.getElementById('listDetailTitle').textContent = data.name;
+    document.getElementById('listDetailBody').innerHTML = data.entries.map(e => {
+        const status = (e.status || 'not linked').toLowerCase();
+        const flag = e.video_type === 'unofficial_clip' ? ' (unofficial clip)' : '';
+        const link = e.video_id ? `<a href="/video/${e.video_id}">open</a>` : '';
+        return `<tr><td class="num">${e.rank}</td><td>${esc(e.artist)}</td><td>${esc(e.title)}</td>` +
+            `<td><span class="badge-state ${esc(status)}">${esc(status)}</span>${esc(flag)}</td><td>${esc(e.quality || '')}</td><td>${link}</td></tr>`;
+    }).join('');
+    document.getElementById('listDetail').scrollIntoView({ behavior: 'smooth' });
+}
+
+async function loadGrabs() {
+    const body = document.getElementById('grabsBody');
+    try {
+        const data = await api('/api/arr/indexer/grabs?limit=50');
+        if (!data.grabs.length) { body.innerHTML = '<tr><td colspan="5">No grabs yet.</td></tr>'; return; }
+        body.innerHTML = data.grabs.map(g =>
+            `<tr><td>${esc((g.created_at || '').replace('T', ' ').slice(0, 16))}</td>` +
+            `<td>${esc(g.artist)} - ${esc(g.video_title)}</td><td>${esc(g.release_title)}</td>` +
+            `<td>${esc(g.protocol)} / ${esc(g.indexer || '')}${g.resolution ? ' / ' + g.resolution + 'p' : ''}</td>` +
+            `<td><span class="badge-state ${esc(g.status)}">${esc(g.status)}</span>${g.error ? '<br><small>' + esc(g.error) + '</small>' : ''}</td></tr>`).join('');
+    } catch (e) {
+        body.innerHTML = `<tr><td colspan="5">Could not load grabs: ${esc(e.message)}</td></tr>`;
+    }
+}
+
+async function refreshBillboard() {
+    try { await api('/api/arr/lists/billboard/refresh', { method: 'POST', body: '{}' }); toast('Fetching Billboard lists in the background', 'success'); }
+    catch (e) { toast('Could not start: ' + e.message, 'error'); }
+}
+
+async function linkLists() {
+    try {
+        const r = await api('/api/arr/lists/link', { method: 'POST' });
+        toast(`Linked ${r.linked}, created ${r.created} wanted videos`, 'success');
+        loadLists();
+    } catch (e) { toast('Linking failed: ' + e.message, 'error'); }
+}
+
+async function syncPlex(scan) {
+    try { await api('/api/arr/plex/sync?scan=' + (scan ? 'true' : 'false'), { method: 'POST' }); toast('Plex sync started', 'success'); }
+    catch (e) { toast('Could not start Plex sync: ' + e.message, 'error'); }
+}
+
+async function clearCooldown() {
+    try { await api('/api/arr/youtube/cooldown/clear', { method: 'POST' }); toast('YouTube downloads resumed', 'success'); loadStatus(); }
+    catch (e) { toast(e.message, 'error'); }
+}
+
+document.addEventListener('DOMContentLoaded', () => { loadStatus(); loadLists(); loadGrabs(); });
+</script>
+{% endblock %}
