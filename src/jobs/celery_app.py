@@ -141,6 +141,12 @@ celery_app.conf.update(
             "schedule": timedelta(minutes=30),
             "options": {"queue": "scheduler", "expires": 1700},
         },
+        # Artist genres from MusicBrainz, for Plex genre collections
+        "artist-genres": {
+            "task": "src.tasks.arr_tasks.artist_genres_task",
+            "schedule": timedelta(hours=6),
+            "options": {"queue": "scheduler", "expires": 3600},
+        },
         # Billboard Year-End lists (a new year appears in December)
         "media-lists-refresh": {
             "task": "src.tasks.arr_tasks.media_lists_refresh_task",

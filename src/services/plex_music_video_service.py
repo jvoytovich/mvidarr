@@ -27,6 +27,12 @@ COLLECTION_MODE_DEFAULT = -1
 COLLECTION_MODE_HIDE = 0
 COLLECTION_MODE_HIDE_ITEMS = 1
 COLLECTION_MODE_SHOW_ITEMS = 2
+COLLECTION_MODES = {
+    "default": COLLECTION_MODE_DEFAULT,
+    "hide": COLLECTION_MODE_HIDE,
+    "hide_items": COLLECTION_MODE_HIDE_ITEMS,
+    "show_items": COLLECTION_MODE_SHOW_ITEMS,
+}
 
 # Keep URLs well under Plex's request-line limit when sending many keys.
 _URI_CHUNK = 100
@@ -359,7 +365,8 @@ class PlexMusicVideoClient:
     ) -> Dict:
         """
         Make a collection hold exactly rating_keys (exclusive) or at least
-        them. Returns counts of what changed.
+        them. Sort title and mode are set when the collection is created, so
+        a mode changed by hand in Plex is kept. Returns counts of what changed.
         """
         rating_keys = [str(k) for k in dict.fromkeys(rating_keys)]
         existing = existing if existing is not None else self.collections()
@@ -386,8 +393,6 @@ class PlexMusicVideoClient:
             self._remove_from_collection(key, remove)
         if sort_title and found.get("titleSort") not in (None, sort_title):
             self.set_collection_sort_title(key, sort_title)
-        if mode is not None and str(found.get("collectionMode", "")) != str(mode):
-            self.set_collection_mode(key, mode)
         return {"created": False, "added": len(add), "removed": len(remove)}
 
     # ------------------------------------------------------------ playlists

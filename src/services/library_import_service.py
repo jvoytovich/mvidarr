@@ -27,6 +27,8 @@ from src.utils.music_matching import (
     parse_artist_title,
     song_key,
     split_featured,
+    strip_release_tail,
+    strip_track_number,
 )
 
 logger = get_logger("mvidarr.library_import")
@@ -45,14 +47,24 @@ VIDEO_EXTENSIONS = {
     ".flv",
     ".vob",
 }
-_SKIP_DIRS = {"@eaDir", "#recycle", ".Trash", "lost+found", "Sample", "sample"}
+_SKIP_DIRS = {
+    "lost+found",
+    "Sample",
+    "sample",
+    "$RECYCLE.BIN",
+    "System Volume Information",
+}
 
 
 def scan_video_files(root: str) -> List[str]:
     found = []
     for dirpath, dirnames, filenames in os.walk(root):
+        # NAS snapshot and recycle folders: @eaDir, @Recently-Snapshot,
+        # @Recycle, #recycle, #snapshot
         dirnames[:] = sorted(
-            d for d in dirnames if not d.startswith(".") and d not in _SKIP_DIRS
+            d
+            for d in dirnames
+            if not d.startswith((".", "@", "#")) and d not in _SKIP_DIRS
         )
         for name in sorted(filenames):
             if name.startswith("."):
@@ -67,13 +79,13 @@ def scan_video_files(root: str) -> List[str]:
 
 
 def parse_library_file(path: str, root: str) -> Tuple[Optional[str], Optional[str]]:
-    stem = os.path.splitext(os.path.basename(path))[0]
-    artist, title = parse_artist_title(stem)
+    stem = strip_release_tail(os.path.splitext(os.path.basename(path))[0])
+    artist, title = parse_artist_title(strip_track_number(stem))
     if artist and title:
         return artist, title
     parent = os.path.basename(os.path.dirname(path))
     if os.path.normpath(os.path.dirname(path)) != os.path.normpath(root) and parent:
-        return parent, stem
+        return parent, strip_track_number(stem, require_separator=False)
     return None, None
 
 

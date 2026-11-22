@@ -204,6 +204,16 @@ def init_default_settings():
             "Unofficial clips (review)",
             "Collection for unofficial clips",
         ),
+        (
+            "artist_genres_from_musicbrainz",
+            "true",
+            "Look up missing artist genres on MusicBrainz",
+        ),
+        (
+            "plex_mv_collection_mode",
+            "hide",
+            "New collections: hide (Collections tab only), show_items, hide_items or default",
+        ),
         # Usenet/torrent indexers via Prowlarr
         ("indexer_enabled", "false", "Search Prowlarr before YouTube"),
         ("prowlarr_url", "", "Prowlarr URL"),

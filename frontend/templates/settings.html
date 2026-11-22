@@ -779,6 +779,16 @@ input:checked + .slider:before {
                 <input type="number" id="plex_mv_artist_collection_min" name="plex_mv_artist_collection_min" min="1" max="50" value="2">
             </div>
             <div class="form-group">
+                <label for="plex_mv_collection_mode">Where new collections appear:</label>
+                <select id="plex_mv_collection_mode" name="plex_mv_collection_mode">
+                    <option value="hide">Collections tab only (library grid shows the videos)</option>
+                    <option value="show_items">Library grid, next to the videos</option>
+                    <option value="hide_items">Library grid, instead of their videos</option>
+                    <option value="default">Plex library default</option>
+                </select>
+                <small>Set when a collection is created. A mode you change in Plex is kept.</small>
+            </div>
+            <div class="form-group">
                 <label for="plex_mv_unofficial_collection">Collection for unofficial clips to review:</label>
                 <input type="text" id="plex_mv_unofficial_collection" name="plex_mv_unofficial_collection" value="Unofficial clips (review)">
             </div>

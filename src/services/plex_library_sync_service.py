@@ -27,7 +27,8 @@ from src.database.models import (
     VideoStatus,
 )
 from src.services.plex_music_video_service import (
-    COLLECTION_MODE_SHOW_ITEMS,
+    COLLECTION_MODE_HIDE,
+    COLLECTION_MODES,
     PlexError,
     PlexMusicVideoClient,
     wait_for_scan,
@@ -376,13 +377,17 @@ def sync_plex_library(
 
     existing = client.collections()
     wanted = desired_collections(state, key_for)
+    mode = COLLECTION_MODES.get(
+        (SettingsService.get("plex_mv_collection_mode", "hide") or "hide").lower(),
+        COLLECTION_MODE_HIDE,
+    )
     for title, (keys, sort_title) in sorted(wanted.items()):
         try:
             result = client.ensure_collection(
                 title,
                 keys,
                 sort_title=sort_title,
-                mode=COLLECTION_MODE_SHOW_ITEMS,
+                mode=mode,
                 exclusive=True,
                 existing=existing,
             )

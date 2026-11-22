@@ -327,3 +327,62 @@ def test_dry_run_reads_plex_but_writes_nothing(library):
     assert stats["collection_changes"]["Billboard Year-End 1990"]["created"] is True
     assert stats["playlists"]["Billboard Year-End Hot 100: 1990"] == "created"
     assert stats["planned_writes"] > 0
+
+
+def test_new_collections_are_hidden_and_existing_modes_kept(library):
+    fake = FakePlex(["/mnt/blofeld/music-videos/MVidarr/Madonna/Madonna - Vogue.mp4"])
+    fake.collections["900"] = {"title": "Billboard Year-End 1990", "items": []}
+    sync_plex_library(client=client_for(fake))
+    prefs = [c for c in fake.calls if c[1].endswith("/prefs")]
+    assert prefs and all(c[2]["collectionMode"] == 0 for c in prefs)
+    assert not any(c[1] == "/library/metadata/900/prefs" for c in prefs)
+
+    set_settings(plex_mv_collection_mode="show_items")
+    fake2 = FakePlex(["/mnt/blofeld/music-videos/MVidarr/Madonna/Madonna - Vogue.mp4"])
+    sync_plex_library(client=client_for(fake2))
+    assert {c[2]["collectionMode"] for c in fake2.calls if c[1].endswith("/prefs")} == {
+        2
+    }
+
+
+def test_missing_artist_genres_come_from_musicbrainz(library, arr_db):
+    from src.services.artist_genre_service import fill_artist_genres
+
+    session = arr_db()
+    nobody = Artist(name="The Pointer Sisters")
+    session.add(nobody)
+    session.flush()
+    session.add(
+        Video(
+            artist_id=nobody.id,
+            title="Slow Hand",
+            status=VideoStatus.DOWNLOADED,
+            local_path="/media/x/Pointer Sisters - Slow Hand.mp4",
+        )
+    )
+    session.commit()
+    artist_id = nobody.id
+    session.close()
+
+    asked = []
+
+    def search(name):
+        asked.append(name)
+        return [
+            {
+                "name": "Pointer Sisters",
+                "confidence": 0.95,
+                "mbid": "mb-1",
+                "tags": ["R&B", "soul", "disco"],
+                "genres": [],
+            },
+        ]
+
+    stats = fill_artist_genres(search=search)
+    assert asked == ["The Pointer Sisters"]  # Madonna and Prince already have genres
+    assert stats == {"checked": 1, "filled": 1, "not_found": 0, "errors": 0}
+    session = arr_db()
+    artist = session.get(Artist, artist_id)
+    assert artist.genres == ["r&b", "soul", "disco"] and artist.musicbrainz_id == "mb-1"
+    session.close()
+    assert fill_artist_genres(search=search)["checked"] == 0

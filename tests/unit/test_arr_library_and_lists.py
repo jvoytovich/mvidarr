@@ -307,3 +307,14 @@ class TestBillboardLists:
             == 0
         )
         session.close()
+
+
+def test_nas_snapshot_and_recycle_folders_are_skipped(tmp_path):
+    from src.services.library_import_service import scan_video_files
+
+    for folder in ("@Recently-Snapshot", "@Recycle", "#recycle", "@eaDir", ".hidden"):
+        touch(str(tmp_path / folder / "Madonna - Vogue.mp4"))
+    touch(str(tmp_path / "Madonna" / "Madonna - Vogue.mp4"))
+    assert scan_video_files(str(tmp_path)) == [
+        str(tmp_path / "Madonna" / "Madonna - Vogue.mp4")
+    ]

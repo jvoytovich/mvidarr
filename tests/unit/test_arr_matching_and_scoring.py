@@ -194,3 +194,46 @@ class TestYouTubeCandidateScoring:
         assert score_candidate("Madonna", "Like a Prayer", cand, 1) >= 60
         too_long = dict(cand, duration=3600)
         assert score_candidate("Madonna", "Like a Prayer", too_long, 1) is None
+
+
+class TestFileNamesFromDisk:
+    def test_apostrophes_in_titles_are_kept(self):
+        assert clean_video_title("Somebody's Knockin'", "Terri Gibbs") == (
+            "Somebody's Knockin'"
+        )
+        assert clean_video_title("'65 Love Affair", "Paul Davis") == "'65 Love Affair"
+        assert clean_video_title('"Say Say Say"', "Paul McCartney") == "Say Say Say"
+
+    def test_names_never_start_with_a_dot(self):
+        assert library_folder(".38 Special") == "38 Special"
+        assert library_stem(".38 Special", "Caught Up In You") == (
+            "38 Special - Caught Up In You"
+        )
+
+    def test_track_numbers_and_release_tags_are_dropped(self):
+        from src.services.library_import_service import parse_library_file
+
+        cases = {
+            "/r/37. Samantha Fox - Touch Me.mp4": ("Samantha Fox", "Touch Me"),
+            "/r/A-Ha - Take On Me.540p.h264-rage.mkv": ("A-Ha", "Take On Me"),
+            "/r/311 - Amber.mp4": ("311", "Amber"),
+            "/r/10cc - I'm Not in Love.mp4": ("10cc", "I'm Not in Love"),
+            "/r/Dr. Dre - Still D.R.E..mp4": ("Dr. Dre", "Still D.R.E."),
+            "/r/Prince/01. Kiss.mp4": ("Prince", "Kiss"),
+        }
+        for path, expected in cases.items():
+            assert parse_library_file(path, "/r") == expected, path
+
+
+def test_bracketed_source_phrase_is_rejected():
+    scored = score_release(
+        release("Madonna - Vogue (Truth Or Dare 1991)", protocol="torrent", seeders=30),
+        "Madonna",
+        "Vogue",
+    )
+    assert not scored.accepted and "bracketed" in scored.reasons[0]
+    assert score_release(
+        release("Madonna - Vogue (Official Music Video) [1080p] [rarbg]", seeders=5),
+        "Madonna",
+        "Vogue",
+    ).accepted

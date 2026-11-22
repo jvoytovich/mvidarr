@@ -151,8 +151,19 @@ def clean_video_title(title: str, artist: Optional[str] = None) -> str:
         text,
         flags=re.I,
     ).strip()
-    text = text.strip(" -–—|:\"'“”")
+    text = _strip_wrapping_quotes(text.strip(" -–—|:"))
     return text or (title or "").strip()
+
+
+def _strip_wrapping_quotes(text: str) -> str:
+    """
+    Drop quote marks around a title but keep apostrophes that belong to it
+    ("Somebody's Knockin'", "'65 Love Affair").
+    """
+    text = re.sub(r'^["“”]+|["“”]+$', "", text).strip()
+    if text.startswith("‘") and text.endswith("’"):
+        text = text[1:-1].strip()
+    return text.strip(" -–—|:")
 
 
 def title_key(title: str, artist: Optional[str] = None) -> str:
@@ -218,7 +229,8 @@ def is_live_upload(song_title: str, candidate_title: str) -> bool:
 def safe_filename(text: str, limit: int = 120) -> str:
     """Strip characters that are illegal on Windows/SMB/NFS shares."""
     text = re.sub(r'[\\/:*?"<>|\x00-\x1f]', "", text or "")
-    text = re.sub(r"\s+", " ", text).strip().rstrip(".")
+    # Leading dots would make the file or folder hidden (".38 Special")
+    text = re.sub(r"\s+", " ", text).strip().strip(".").strip()
     return text[:limit].strip() or "Unknown"
 
 
@@ -231,6 +243,38 @@ def library_stem(artist: str, title: str) -> str:
     """File name without extension: 'Artist - Title'."""
     clean = clean_video_title(title, artist)
     return safe_filename(f"{artist} - {a_side(clean)}", limit=180)
+
+
+_TRACK_NUMBER = re.compile(r"^\s*\d{1,3}\s*[.)-]\s+")
+_RELEASE_TAIL = re.compile(
+    r"(?:[._](?:\d{3,4}[pi]|4k|uhd|[hx]\.?26[45]|hevc|avc|xvid|divx"
+    r"|web(?:-?dl|rip)?|dvd(?:rip|5|9)?|blu-?ray|bdrip|brrip|hdtv|vhs(?:rip)?)\b"
+    r"|\s(?:\d{3,4}p|[hx]\.?26[45]|hevc)\b).*$",
+    flags=re.I,
+)
+
+
+def strip_release_tail(stem: str) -> str:
+    """'Take On Me.540p.h264-rage' -> 'Take On Me'."""
+    stem = stem or ""
+    trimmed = _RELEASE_TAIL.sub("", stem)
+    if trimmed == stem:
+        return stem
+    return trimmed.strip(" ._-") or stem
+
+
+def strip_track_number(stem: str, require_separator: bool = True) -> str:
+    """
+    '37. Samantha Fox - Touch Me' -> 'Samantha Fox - Touch Me'. With
+    require_separator, the number is only dropped when an 'Artist - Title'
+    is left, so '311 - Amber' keeps its artist.
+    """
+    stripped = _TRACK_NUMBER.sub("", stem or "", count=1)
+    if stripped == stem or not stripped:
+        return stem
+    if require_separator and not re.search(r"\s[-–—]\s", stripped):
+        return stem
+    return stripped
 
 
 def parse_artist_title(stem: str) -> Tuple[Optional[str], Optional[str]]:

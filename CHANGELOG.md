@@ -13,12 +13,17 @@ See `docs/MUSIC_VIDEO_ARR.md`. Everything is off until enabled in Settings > Ser
 - **Plex Music Videos library** (movie-type, Personal Media agent): files are saved as `Artist/Artist - Title.ext` with a `.jpg` poster; Plex scans only the folder a new file lands in; a sync task sets title, sort title, year, genres and summary and maintains collections (one per chart list, `Genre:`, `Decade:`, `Artist:`, unofficial clips) and chart-order playlists.
 - **Chart lists**: Billboard Year-End Hot 100 (1956 onward) from Wikipedia as lists on a new Lists page; missing songs become WANTED videos under unmonitored artists. One-time takeover of the homelab Billboard script's state. New tables `media_lists`, `media_list_entries`.
 - **In-place library import** (`POST /api/arr/library/import`): registers existing files without moving them, fills matching WANTED videos, new artists unmonitored.
+- **Plex sync preview** (`POST /api/arr/plex/sync?dry_run=true`, Preview Changes button): reads Plex and reports what a sync would edit, create, change and delete, without writing.
+- **Artist genres from MusicBrainz**: every 6 hours, up to 200 artists with downloaded videos and no genres are looked up (no API key), so genre collections can be built.
 - New API under `/api/arr`, new Celery tasks in `src/tasks/arr_tasks.py`, `ytmusicapi==1.12.4` dependency.
 
 ### Changed (fork)
 - YouTube URL resolution now picks the official music video (YouTube Music OMV flag, else channel + title scoring) instead of the first search hit; fan uploads are used only as a fallback and flagged `unofficial_clip`.
 - A YouTube bot check or HTTP 429 pauses all YouTube downloads for `youtube_cooldown_hours` (default 6) and requeues the video instead of failing it. Age-restricted uploads are treated as a dead URL (another upload is tried) and never pause downloads.
 - YouTube downloads are capped at `max_concurrent_downloads` at a time per process (previously every dispatched video started at once).
+- New Plex collections appear only in the Collections tab by default (`plex_mv_collection_mode`); the mode is set on creation only, so a mode changed in Plex is kept.
+- Titles keep their apostrophes ("Somebody's Knockin'", "'65 Love Affair"); only wrapping double quotes are dropped. File and folder names never start with a dot, which Plex treats as hidden.
+- The library import drops leading track numbers and trailing release tags from file names and skips NAS snapshot/recycle folders (`@...`, `#...`). Releases whose name has a bracketed source phrase ("(Truth Or Dare 1991)") are rejected.
 
 Weekly Dependabot sweep (2026-11-16): consolidates five of seven open Dependabot PRs (#592, #593, #594, #596, #597). Zero open Dependabot/code-scanning alerts and pip-audit clean on all three requirements files before and after.
 

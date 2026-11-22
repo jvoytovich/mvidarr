@@ -75,3 +75,20 @@ def media_lists_refresh_task(years: Optional[List[int]] = None) -> Dict[str, Any
     from src.services.media_list_service import refresh_billboard
 
     return refresh_billboard(years=years)
+
+
+@celery_app.task(
+    name="src.tasks.arr_tasks.artist_genres_task",
+    soft_time_limit=1700,
+    time_limit=1800,
+)
+def artist_genres_task(limit: int = 200) -> Dict[str, Any]:
+    """Missing artist genres from MusicBrainz, for Plex genre collections."""
+    _fresh_settings()
+    if not SettingsService.get_bool("plex_mv_enabled", False):
+        return {"skipped": "Plex music video library not enabled"}
+    if not SettingsService.get_bool("artist_genres_from_musicbrainz", True):
+        return {"skipped": "MusicBrainz genre lookup disabled"}
+    from src.services.artist_genre_service import fill_artist_genres
+
+    return fill_artist_genres(limit=limit)

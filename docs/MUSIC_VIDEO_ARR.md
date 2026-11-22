@@ -75,7 +75,12 @@ Featured artists stay in the file name but not the folder
 `POST /api/arr/library/import` with `{"path": "...", "dry_run": true}`
 (admin only) walks a folder and registers every video file in place. Nothing
 is moved or renamed. Artist and title come from `Artist - Title.ext`, or from
-the parent folder when the name has no ` - `. A file that matches a WANTED
+the parent folder when the name has no ` - `. A leading track number
+(`37. Samantha Fox - Touch Me`) and release tags after the title
+(`Take On Me.540p.h264-rage`) are dropped. Hidden folders and NAS folders
+starting with `@` or `#` (`@eaDir`, `@Recently-Snapshot`, `#recycle`) are
+skipped; Plex skips hidden folders too, so new downloads never start a file
+or folder name with a dot. A file that matches a WANTED
 video fills it, so it will not be downloaded again. New artists start
 unmonitored with auto-download off. Run it with `dry_run: false` once the
 counts look right.
@@ -93,9 +98,12 @@ Every 30 minutes (or **Sync Library Now**):
 - Title is set to `Artist - Title`, sort title to `Artist Title`, year to the
   video's year or the first chart year, genres to at most two broad genres
   mapped from the artist's tags, and the summary lists chart positions.
-- Collections, all shown alongside the items:
+- Collections (new ones appear only in the Collections tab, so the library
+  grid stays a list of videos; change `plex_mv_collection_mode` to show them
+  in the grid. A mode you change in Plex is kept):
   - one per chart list, e.g. `Billboard Year-End 1984`
-  - `Genre: Rock`, `Genre: Hip-Hop`, ... (at least 3 videos)
+  - `Genre: Rock`, `Genre: Hip-Hop`, ... (at least 3 videos). Artists
+    without genres get them from MusicBrainz tags every 6 hours.
   - `Decade: 1980s`
   - `Artist: Madonna` for artists with at least 2 videos
   - `Unofficial clips (review)`
@@ -150,6 +158,8 @@ remembers the ids it rejected. Disable the script's timers afterwards.
 | `plex_mv_collections_lists/genre/decade/artist` | true | Collection types |
 | `plex_mv_artist_collection_min`, `plex_mv_genre_min_items` | 2, 3 | Collection thresholds |
 | `plex_mv_unofficial_collection` | `Unofficial clips (review)` | Review collection |
+| `artist_genres_from_musicbrainz` | true | Fill missing artist genres from MusicBrainz tags (every 6 hours, 200 artists a run) |
+| `plex_mv_collection_mode` | `hide` | Where new collections appear: `hide`, `show_items`, `hide_items`, `default` |
 | `billboard_lists_enabled`, `billboard_first_year` | false, 1956 | Chart lists |
 | `lists_auto_add_wanted` | true | Create WANTED videos for list songs |
 | `download_filename_format` | `artist_title` | File naming |

@@ -264,6 +264,20 @@ def score_release(
             result.reasons.append(f"'{bad}' release")
             return result
 
+    # A phrase in brackets names a different source: "(Truth Or Dare 1991)",
+    # "[MTV Unplugged]". One word is allowed for group/site tags like "[rarbg]".
+    for segment in re.findall(r"[\(\[\{]([^\)\]\}]*)[\)\]\}]", release.title or ""):
+        extra_words = [
+            w
+            for w in norm(segment).split()
+            if w not in _TECH_TAGS
+            and not re.fullmatch(r"(19|20)\d\d", w)
+            and f" {w} " not in song_words
+        ]
+        if len(extra_words) >= 2:
+            result.reasons.append(f"bracketed extra: {' '.join(extra_words[:4])}")
+            return result
+
     if release.protocol == "torrent" and not (release.seeders or 0) > 0:
         result.reasons.append("no seeders")
         return result
