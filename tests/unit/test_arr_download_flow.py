@@ -361,3 +361,52 @@ def test_no_youtube_upload_rests_as_failed_then_is_searched_again(arr_db, video_
     session.close()
     assert retry_youtube_misses(days=7) == [video_id]
     assert status(arr_db, video_id) == VideoStatus.WANTED
+
+
+def _fake_attempts(tmp_path, heights):
+    """_attempt_download stand-in: writes <filename>.mp4 (+ .jpg) and reports it."""
+    calls = []
+
+    def attempt(ctx, level, force_player_client=None):
+        calls.append((ctx.filename, level))
+        path = tmp_path / f"{ctx.filename}.mp4"
+        path.write_bytes(f"{level.value}-{ctx.filename}".encode())
+        (tmp_path / f"{ctx.filename}.jpg").write_bytes(b"jpg")
+        heights[str(path)] = heights.pop(level, None)
+        return DownloadResult(success=True, file_path=str(path), file_size=1)
+
+    return attempt, calls
+
+
+@pytest.mark.parametrize("retry_height,keeps", [(720, "retry"), (240, "original")])
+def test_low_res_retry_never_deletes_the_file_it_keeps(tmp_path, retry_height, keeps):
+    """The retry used the same name, so dropping the 'other' copy deleted the kept one."""
+    strategy = YouTubeDownloadStrategy(
+        ytdlp_manager=MagicMock(current_executable="yt-dlp"), anti_detection=MagicMock()
+    )
+    heights = {
+        AntiDetectionLevel.AGGRESSIVE: 360,
+        AntiDetectionLevel.MODERATE: retry_height,
+    }
+    attempt, calls = _fake_attempts(tmp_path, heights)
+    strategy._attempt_download = attempt
+    strategy._probe_video_height = lambda path: heights.get(path)
+    ctx = context(
+        1,
+        filename="Buddy Knox - Party Doll",
+        output_path=str(tmp_path),
+        anti_detection=AntiDetectionLevel.AGGRESSIVE,
+    )
+
+    result = strategy.download(ctx)
+
+    final = tmp_path / "Buddy Knox - Party Doll.mp4"
+    assert result.success and result.file_path == str(final)
+    assert final.exists()  # the bug: this file was gone
+    assert calls[1][0] == "Buddy Knox - Party Doll.mvidarr-retry"
+    expected = "moderate" if keeps == "retry" else "aggressive"
+    assert final.read_bytes().startswith(expected.encode())
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "Buddy Knox - Party Doll.jpg",
+        "Buddy Knox - Party Doll.mp4",
+    ]

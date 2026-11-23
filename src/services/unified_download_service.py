@@ -382,18 +382,47 @@ class YouTubeDownloadStrategy(DownloadStrategy):
                             f"Low-res download ({height}p) with {current_level}; "
                             "retrying once with MODERATE for better formats"
                         )
+                        # The retry writes under its own name: with the same
+                        # output name yt-dlp reports (or overwrites) the same
+                        # file, and dropping the "discarded" copy deleted the
+                        # one being kept
+                        from dataclasses import replace
+
+                        stem = context.filename or context.title
+                        retry_stem = f"{stem}.mvidarr-retry"
                         retry = self._attempt_download(
-                            context, AntiDetectionLevel.MODERATE
+                            replace(context, filename=retry_stem),
+                            AntiDetectionLevel.MODERATE,
                         )
-                        if retry.success:
+                        separate = (
+                            retry.success
+                            and retry.file_path
+                            and retry.file_path != result.file_path
+                        )
+                        if separate:
                             retry_h = self._probe_video_height(retry.file_path)
                             if retry_h is None or retry_h >= height:
-                                # Retry is at least as good: keep it, drop the low-res original
-                                self._remove_file(result.file_path)
-                                retry.duration = time.time() - start_time
-                                return retry
+                                # Retry is at least as good: keep it under the
+                                # original's name, the low-res copy goes
+                                kept = retry.file_path
+                                name = os.path.basename(retry.file_path)
+                                if name.startswith(f"{retry_stem}."):
+                                    kept = self._swap_in_retry(
+                                        os.path.dirname(retry.file_path),
+                                        retry_stem,
+                                        stem,
+                                        retry.file_path,
+                                        result.file_path,
+                                    )
+                                else:
+                                    self._remove_file(result.file_path)
+                                if kept:
+                                    retry.file_path = kept
+                                    retry.duration = time.time() - start_time
+                                    return retry
                             # Retry is worse: drop it, keep the original
                             self._remove_file(retry.file_path)
+                        self._remove_stem_files(context.output_path, retry_stem)
                     result.duration = time.time() - start_time
                     return result
 
@@ -448,6 +477,48 @@ class YouTubeDownloadStrategy(DownloadStrategy):
             error_message=f"All {max_attempts} download attempts failed: {detail}",
             duration=time.time() - start_time,
         )
+
+    def _remove_stem_files(self, folder: str, stem: str) -> None:
+        """Best-effort removal of every file a discarded attempt wrote."""
+        try:
+            for name in os.listdir(folder):
+                if name.startswith(f"{stem}."):
+                    self._remove_file(os.path.join(folder, name))
+        except OSError:
+            pass
+
+    def _swap_in_retry(
+        self,
+        folder: str,
+        retry_stem: str,
+        stem: str,
+        retry_path: str,
+        original_path: Optional[str],
+    ) -> Optional[str]:
+        """
+        Give the retry's files (video, thumbnail, info.json) the original
+        name, then remove the low-res original. Returns the kept video path,
+        or None if the video could not be moved (the original is untouched).
+        """
+        ext = os.path.splitext(retry_path)[1]
+        final = os.path.join(folder, f"{stem}{ext}")
+        try:
+            os.replace(retry_path, final)
+        except OSError as exc:
+            logger.warning(f"Could not swap in the retry download: {exc}")
+            return None
+        try:
+            for name in os.listdir(folder):
+                if name.startswith(f"{retry_stem}."):
+                    os.replace(
+                        os.path.join(folder, name),
+                        os.path.join(folder, stem + name[len(retry_stem) :]),
+                    )
+        except OSError as exc:
+            logger.warning(f"Retry side files not renamed: {exc}")
+        if original_path and os.path.abspath(original_path) != os.path.abspath(final):
+            self._remove_file(original_path)
+        return final
 
     def _remove_file(self, file_path: Optional[str]) -> None:
         """Best-effort removal of a discarded download."""
