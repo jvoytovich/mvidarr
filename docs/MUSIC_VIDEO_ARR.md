@@ -174,6 +174,7 @@ remembers the ids it rejected. Disable the script's timers afterwards.
 | `download_filename_format` | `artist_title` | File naming |
 | `download_write_thumbnail` | true | Poster `.jpg` next to YouTube downloads |
 | `youtube_cooldown_hours` | 6 | Pause after a bot check |
+| `stuck_download_reset_hours` | 3 | Every 30 minutes, put a video back to WANTED when it has been downloading this long with no Usenet/torrent job (its worker process was replaced or restarted). 0 turns it off |
 
 ## Docker volumes
 

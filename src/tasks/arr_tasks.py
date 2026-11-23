@@ -31,6 +31,18 @@ def indexer_poll_task() -> Dict[str, Any]:
     return poll_grabs(config)
 
 
+@celery_app.task(name="src.tasks.arr_tasks.reset_stuck_downloads_task")
+def reset_stuck_downloads_task() -> Dict[str, Any]:
+    """Requeue videos whose download thread died with its worker process."""
+    _fresh_settings()
+    from src.services.video_batch_service import reset_stuck_downloads
+
+    hours = SettingsService.get_float("stuck_download_reset_hours", 3)
+    if hours <= 0:
+        return {"skipped": "turned off"}
+    return {"reset": reset_stuck_downloads(hours)}
+
+
 @celery_app.task(
     name="src.tasks.arr_tasks.indexer_upgrade_task",
     soft_time_limit=3300,

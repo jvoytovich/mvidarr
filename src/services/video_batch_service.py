@@ -75,6 +75,44 @@ def claim_video_for_download(video_id: int) -> bool:
         return False
 
 
+def reset_stuck_downloads(hours: float = 3) -> List[int]:
+    """
+    Put videos back to WANTED that have sat in DOWNLOADING for `hours`.
+
+    YouTube downloads run as threads inside a Celery worker process. When
+    that process is replaced (worker_max_tasks_per_child) or the container
+    restarts, the threads die without a word and the video stays in
+    DOWNLOADING for good. A video handed to SABnzbd/qBittorrent keeps its
+    status while the grab is active, so those are left alone.
+    """
+    from datetime import timedelta
+
+    from src.database.models import IndexerGrab
+    from src.services.indexers.indexer_service import ACTIVE_STATES
+
+    cutoff = datetime.utcnow() - timedelta(hours=hours)
+    with get_db() as session:
+        grabbed = session.query(IndexerGrab.video_id).filter(
+            IndexerGrab.status.in_(ACTIVE_STATES)
+        )
+        stuck = (
+            session.query(Video)
+            .filter(Video.status == VideoStatus.DOWNLOADING)
+            .filter(Video.updated_at < cutoff)
+            .filter(~Video.id.in_(grabbed))
+            .all()
+        )
+        ids = [video.id for video in stuck]
+        for video in stuck:
+            video.status = VideoStatus.WANTED
+        if ids:
+            session.commit()
+            logger.warning(
+                f"Reset {len(ids)} video(s) stuck in DOWNLOADING for {hours} h: {ids}"
+            )
+    return ids
+
+
 def claim_video_for_redownload(video_id: int) -> bool:
     """Atomically claim a video for (re)download from any status except
     DOWNLOADING itself (#377).

@@ -241,6 +241,11 @@ def init_default_settings():
             "3",
             "Give up on a torrent that found no peers",
         ),
+        (
+            "stuck_download_reset_hours",
+            "3",
+            "Requeue a video stuck downloading this long (0 = off)",
+        ),
         ("indexer_upgrades_enabled", "true", "Replace YouTube copies with releases"),
         ("indexer_upgrade_searches_per_day", "25", "Upgrade searches per day"),
         # Chart lists

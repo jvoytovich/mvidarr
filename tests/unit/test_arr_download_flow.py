@@ -232,3 +232,60 @@ def test_library_path_is_read_when_downloading_not_at_import(arr_db, tmp_path):
     assert adapter.music_videos_path == str(tmp_path / "library")
     set_settings(music_videos_path="")
     assert adapter.music_videos_path == "data/musicvideos"
+
+
+def test_failure_is_recorded_for_a_video_with_no_url(arr_db, video_id):
+    """No YouTube upload found: the video has no URL, and must still be FAILED."""
+    from src.database.models import Download
+
+    session = arr_db()
+    video = session.get(Video, video_id)
+    video.url = None
+    video.youtube_url = None
+    session.commit()
+    session.close()
+
+    assert UnifiedDownloadService()._update_database_failure(
+        video_id, "No YouTube upload found for this video"
+    )
+    assert status(arr_db, video_id) == VideoStatus.FAILED
+    session = arr_db()
+    assert session.query(Download).one().original_url == ""
+    session.close()
+
+
+def test_videos_stuck_downloading_go_back_to_wanted(arr_db, video_id):
+    """A worker process replaced mid-download leaves the video in DOWNLOADING."""
+    from datetime import datetime, timedelta
+
+    from src.database.models import IndexerGrab
+    from src.services.video_batch_service import reset_stuck_downloads
+
+    session = arr_db()
+    artist_id = session.get(Video, video_id).artist_id
+    old = datetime.utcnow() - timedelta(hours=5)
+    fresh = Video(artist_id=artist_id, title="Frozen", status=VideoStatus.DOWNLOADING)
+    grabbed = Video(artist_id=artist_id, title="Music", status=VideoStatus.DOWNLOADING)
+    session.add_all([fresh, grabbed])
+    session.flush()
+    session.add(
+        IndexerGrab(
+            video_id=grabbed.id,
+            release_title="Madonna-Music-1080p",
+            protocol="torrent",
+            client="qbittorrent",
+            status="downloading",
+        )
+    )
+    session.commit()
+    # Backdate after the commit so onupdate doesn't overwrite it
+    for vid in (video_id, grabbed.id):
+        session.get(Video, vid).updated_at = old
+    session.commit()
+    fresh_id, grabbed_id = fresh.id, grabbed.id
+    session.close()
+
+    assert reset_stuck_downloads(hours=3) == [video_id]
+    assert status(arr_db, video_id) == VideoStatus.WANTED
+    assert status(arr_db, fresh_id) == VideoStatus.DOWNLOADING  # still running
+    assert status(arr_db, grabbed_id) == VideoStatus.DOWNLOADING  # with qBittorrent

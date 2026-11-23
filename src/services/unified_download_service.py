@@ -1272,7 +1272,9 @@ class UnifiedDownloadService:
                             artist_id=video.artist_id,
                             video_id=video_id,
                             title=video.title,
-                            original_url=video.url,
+                            # NOT NULL column; a video YouTube found no upload
+                            # for has no URL at all
+                            original_url=video.url or video.youtube_url or "",
                             status="failed",
                             error_message=error_message,
                             last_error=error_message,

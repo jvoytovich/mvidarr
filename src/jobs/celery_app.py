@@ -141,6 +141,12 @@ celery_app.conf.update(
             "schedule": timedelta(minutes=30),
             "options": {"queue": "scheduler", "expires": 1700},
         },
+        # Videos left in DOWNLOADING when a worker process was replaced
+        "reset-stuck-downloads": {
+            "task": "src.tasks.arr_tasks.reset_stuck_downloads_task",
+            "schedule": timedelta(minutes=30),
+            "options": {"queue": "scheduler", "expires": 1700},
+        },
         # Artist genres from MusicBrainz, for Plex genre collections
         "artist-genres": {
             "task": "src.tasks.arr_tasks.artist_genres_task",
