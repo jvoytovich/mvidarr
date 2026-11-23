@@ -289,3 +289,75 @@ def test_videos_stuck_downloading_go_back_to_wanted(arr_db, video_id):
     assert status(arr_db, video_id) == VideoStatus.WANTED
     assert status(arr_db, fresh_id) == VideoStatus.DOWNLOADING  # still running
     assert status(arr_db, grabbed_id) == VideoStatus.DOWNLOADING  # with qBittorrent
+
+
+def test_leftover_format_pieces_are_never_taken_as_the_video(tmp_path):
+    """A killed download leaves "Song.f270.mp4" (video only) next to Song.mp4."""
+    import os
+    import time
+
+    from src.services.youtube_download_engine import YouTubeDownloadEngine
+    from src.utils.filename_cleanup import is_ytdlp_piece
+
+    assert is_ytdlp_piece("Bobby Rydell - Little Bitty Girl.f270.mp4")
+    assert is_ytdlp_piece("Song.f140.m4a") and is_ytdlp_piece("Song.mp4.part")
+    assert is_ytdlp_piece("Song.fhls-1080p.mp4") and is_ytdlp_piece("Song.mp4.ytdl")
+    assert not is_ytdlp_piece("Bobby Rydell - Little Bitty Girl.mp4")
+    assert not is_ytdlp_piece("Mr. Brightside.final.mp4")
+
+    stem = "Bobby Rydell - Little Bitty Girl"
+    merged = tmp_path / f"{stem}.mp4"
+    merged.write_bytes(b"\0" * 2048)
+    time.sleep(0.01)
+    piece = tmp_path / f"{stem}.f270.mp4"
+    piece.write_bytes(b"\0" * 4096)  # newer and larger than the real file
+    template = str(tmp_path / f"{stem}.%(ext)s")
+
+    strategy = YouTubeDownloadStrategy(
+        ytdlp_manager=MagicMock(current_executable="yt-dlp"), anti_detection=MagicMock()
+    )
+    assert strategy._find_downloaded_file(template, []) == str(merged)
+    line = f"[download] {merged} has already been downloaded"
+    assert strategy._find_downloaded_file(template, [line]) == str(merged)
+
+    engine = YouTubeDownloadEngine.__new__(YouTubeDownloadEngine)
+    assert os.path.basename(engine._find_downloaded_file(template, [])) == merged.name
+    piece_line = f"[download] Destination: {piece}"
+    assert engine._find_downloaded_file(template, [piece_line]) == str(merged)
+    assert engine._find_downloaded_file(template, [line]) == str(merged)
+
+
+def test_no_youtube_upload_rests_as_failed_then_is_searched_again(arr_db, video_id):
+    from datetime import datetime, timedelta
+
+    from src.services.video_batch_service import (
+        YOUTUBE_MISS_KEY,
+        resolve_video_url,
+        retry_youtube_misses,
+    )
+
+    session = arr_db()
+    video = session.get(Video, video_id)
+    video.url = None
+    video.youtube_url = None
+    session.commit()
+    with patch("src.services.youtube_matcher.find_music_video", return_value=None):
+        assert resolve_video_url(video, session) is None
+    session.close()
+
+    session = arr_db()
+    video = session.get(Video, video_id)
+    assert video.video_metadata[YOUTUBE_MISS_KEY]
+    video.status = VideoStatus.FAILED
+    session.commit()
+    session.close()
+    assert retry_youtube_misses(days=7) == []  # too soon
+
+    session = arr_db()
+    video = session.get(Video, video_id)
+    week_ago = (datetime.utcnow() - timedelta(days=8)).isoformat()
+    video.video_metadata = {**video.video_metadata, YOUTUBE_MISS_KEY: week_ago}
+    session.commit()
+    session.close()
+    assert retry_youtube_misses(days=7) == [video_id]
+    assert status(arr_db, video_id) == VideoStatus.WANTED

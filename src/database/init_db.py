@@ -246,6 +246,11 @@ def init_default_settings():
             "3",
             "Requeue a video stuck downloading this long (0 = off)",
         ),
+        (
+            "youtube_miss_retry_days",
+            "7",
+            "Search YouTube again this long after it had no upload (0 = off)",
+        ),
         ("indexer_upgrades_enabled", "true", "Replace YouTube copies with releases"),
         ("indexer_upgrade_searches_per_day", "25", "Upgrade searches per day"),
         # Chart lists

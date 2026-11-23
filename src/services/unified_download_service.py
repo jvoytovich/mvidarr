@@ -631,13 +631,21 @@ class YouTubeDownloadStrategy(DownloadStrategy):
                 )
                 if cand.lower().endswith(media_exts):
                     return cand
-        # Prefer last media Destination (skip .info.json / part files)
+        from src.utils.filename_cleanup import already_downloaded_path, is_ytdlp_piece
+
+        # A file already on disk from an earlier run
+        for line in output_lines:
+            cand = already_downloaded_path(line)
+            if cand and cand.lower().endswith(media_exts) and not is_ytdlp_piece(cand):
+                return cand
+        # Prefer last media Destination (skip .info.json, part files and the
+        # per-format pieces of a merge)
         media_dests = []
         for line in output_lines:
             if "Destination:" in line:
                 cand = line.split("Destination:", 1)[1].strip()
                 low = cand.lower()
-                if low.endswith(media_exts) and not low.endswith(".part"):
+                if low.endswith(media_exts) and not is_ytdlp_piece(cand):
                     media_dests.append(cand)
         if media_dests:
             return media_dests[-1]
@@ -648,7 +656,11 @@ class YouTubeDownloadStrategy(DownloadStrategy):
         if os.path.exists(base_path):
             matches = []
             for file in os.listdir(base_path):
-                if file.startswith(stem) and file.lower().endswith(media_exts):
+                if (
+                    file.startswith(stem)
+                    and file.lower().endswith(media_exts)
+                    and not is_ytdlp_piece(file)
+                ):
                     matches.append(os.path.join(base_path, file))
             if matches:
                 matches.sort(key=lambda p: os.path.getmtime(p), reverse=True)

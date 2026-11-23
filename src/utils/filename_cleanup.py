@@ -263,3 +263,26 @@ def test_filename_cleanup():
 
 if __name__ == "__main__":
     test_filename_cleanup()
+
+
+# yt-dlp's per-format pieces ("Song.f137.mp4", "Song.f140.m4a") and partial
+# files. They are deleted after a merge, but a download killed mid-way leaves
+# them next to (or instead of) the real file, and a video-only piece plays
+# silent.
+_YTDLP_PIECE = re.compile(
+    r"\.f(?:\d+|hls-\w+|dash-\w+)(?:-\d+)?\.[A-Za-z0-9]+$|\.(?:part|ytdl)$|\.part-"
+)
+
+
+def is_ytdlp_piece(name: str) -> bool:
+    """True for a yt-dlp format piece or partial file, never a finished video."""
+    return bool(_YTDLP_PIECE.search(name or ""))
+
+
+def already_downloaded_path(line: str) -> Optional[str]:
+    """The path from yt-dlp's "[download] PATH has already been downloaded"."""
+    marker = " has already been downloaded"
+    if "[download]" not in (line or "") or marker not in line:
+        return None
+    path = line.split("[download]", 1)[1].split(marker, 1)[0].strip()
+    return path or None

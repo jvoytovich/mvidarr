@@ -33,14 +33,22 @@ def indexer_poll_task() -> Dict[str, Any]:
 
 @celery_app.task(name="src.tasks.arr_tasks.reset_stuck_downloads_task")
 def reset_stuck_downloads_task() -> Dict[str, Any]:
-    """Requeue videos whose download thread died with its worker process."""
+    """
+    Requeue videos whose download thread died with its worker process, and
+    videos YouTube had no upload for a week ago.
+    """
     _fresh_settings()
-    from src.services.video_batch_service import reset_stuck_downloads
+    from src.services.video_batch_service import (
+        reset_stuck_downloads,
+        retry_youtube_misses,
+    )
 
+    result: Dict[str, Any] = {}
     hours = SettingsService.get_float("stuck_download_reset_hours", 3)
-    if hours <= 0:
-        return {"skipped": "turned off"}
-    return {"reset": reset_stuck_downloads(hours)}
+    result["reset"] = reset_stuck_downloads(hours) if hours > 0 else "turned off"
+    days = SettingsService.get_float("youtube_miss_retry_days", 7)
+    result["youtube_retry"] = retry_youtube_misses(days) if days > 0 else "turned off"
+    return result
 
 
 @celery_app.task(

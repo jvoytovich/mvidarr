@@ -75,6 +75,38 @@ def claim_video_for_download(video_id: int) -> bool:
         return False
 
 
+YOUTUBE_MISS_KEY = "youtube_miss_at"
+
+
+def retry_youtube_misses(days: float = 7) -> List[int]:
+    """
+    Put FAILED videos back to WANTED when YouTube had no usable upload for
+    them more than `days` ago: an upload may have appeared since.
+    """
+    from datetime import timedelta
+
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    ids = []
+    with get_db() as session:
+        failed = session.query(Video).filter(Video.status == VideoStatus.FAILED)
+        for video in failed:
+            meta = (
+                video.video_metadata if isinstance(video.video_metadata, dict) else {}
+            )
+            stamp = meta.get(YOUTUBE_MISS_KEY)
+            try:
+                missed = datetime.fromisoformat(stamp) if stamp else None
+            except (TypeError, ValueError):
+                missed = None
+            if missed and missed < cutoff:
+                video.status = VideoStatus.WANTED
+                ids.append(video.id)
+        if ids:
+            session.commit()
+            logger.info(f"Searching YouTube again for {len(ids)} video(s): {ids}")
+    return ids
+
+
 def reset_stuck_downloads(hours: float = 3) -> List[int]:
     """
     Put videos back to WANTED that have sat in DOWNLOADING for `hours`.
@@ -281,6 +313,16 @@ def resolve_video_url(video, session, timeout: int = 30) -> Optional[str]:
             logger.warning(
                 f"No usable YouTube upload for {artist_name} - {video_title}"
             )
+            # Remembered so the video can rest as FAILED and be searched
+            # again later (retry_youtube_misses), not on every batch
+            metadata = (
+                dict(video.video_metadata)
+                if isinstance(video.video_metadata, dict)
+                else {}
+            )
+            metadata[YOUTUBE_MISS_KEY] = datetime.utcnow().isoformat()
+            video.video_metadata = metadata
+            session.commit()
             return None
         video.url = match["url"]
         video.youtube_url = match["url"]
@@ -427,6 +469,15 @@ def download_all_wanted_videos_internal(
                         video_url = resolve_video_url(video, session)
 
                     if not video_url and not indexer_first:
+                        # YouTube had no usable upload: FAILED, not left
+                        # WANTED, or the same video is searched again (and
+                        # takes a slot) every batch. retry_youtube_misses()
+                        # puts it back after a while. A search that errored
+                        # leaves no mark and the video stays WANTED.
+                        meta = video.video_metadata
+                        if isinstance(meta, dict) and meta.get(YOUTUBE_MISS_KEY):
+                            video.status = VideoStatus.FAILED
+                            session.commit()
                         results.append(
                             {
                                 "video_id": video_id,
