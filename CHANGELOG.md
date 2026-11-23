@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added: Usenet first, a Plex Music Videos library, chart lists (fork)
+See `docs/MUSIC_VIDEO_ARR.md`. Everything is off until enabled in Settings > Services.
+- **Usenet/torrent first**: a wanted video is searched on Prowlarr (category 3020) before YouTube. Releases are scored on artist/title words, resolution and protocol; live, compilation, lyric and audio releases are rejected. Usenet goes to SABnzbd, torrents (fallback) to qBittorrent. A poll task imports finished downloads into the library and tries the next release on failure; when none is left the video goes back to WANTED for YouTube. Daily search budget, 14-day re-search gap, daily upgrade search that replaces lower-resolution YouTube copies and unofficial clips. New tables `indexer_searches`, `indexer_grabs`.
+- **Plex Music Videos library** (movie-type, Personal Media agent): files are saved as `Artist/Artist - Title.ext` with a `.jpg` poster; Plex scans only the folder a new file lands in; a sync task sets title, sort title, year, genres and summary and maintains collections (one per chart list, `Genre:`, `Decade:`, `Artist:`, unofficial clips) and chart-order playlists.
+- **Chart lists**: Billboard Year-End Hot 100 (1956 onward) from Wikipedia as lists on a new Lists page; missing songs become WANTED videos under unmonitored artists. One-time takeover of the homelab Billboard script's state. New tables `media_lists`, `media_list_entries`.
+- **In-place library import** (`POST /api/arr/library/import`): registers existing files without moving them, fills matching WANTED videos, new artists unmonitored.
+- **Plex sync preview** (`POST /api/arr/plex/sync?dry_run=true`, Preview Changes button): reads Plex and reports what a sync would edit, create, change and delete, without writing.
+- **Artist genres from MusicBrainz**: every 6 hours, up to 200 artists with downloaded videos and no genres are looked up (no API key), so genre collections can be built.
+- New API under `/api/arr`, new Celery tasks in `src/tasks/arr_tasks.py`, `ytmusicapi==1.12.4` dependency.
+
+### Changed (fork)
+- YouTube URL resolution now picks the official music video (YouTube Music OMV flag, else channel + title scoring) instead of the first search hit; fan uploads are used only as a fallback and flagged `unofficial_clip`.
+- A YouTube bot check or HTTP 429 pauses all YouTube downloads for `youtube_cooldown_hours` (default 6) and requeues the video instead of failing it. Age-restricted uploads are treated as a dead URL (another upload is tried) and never pause downloads.
+- YouTube downloads are capped at `max_concurrent_downloads` at a time per process (previously every dispatched video started at once).
+- New Plex collections appear only in the Collections tab by default (`plex_mv_collection_mode`); the mode is set on creation only, so a mode changed in Plex is kept.
+- Titles keep their apostrophes ("Somebody's Knockin'", "'65 Love Affair"); only wrapping double quotes are dropped. File and folder names never start with a dot, which Plex treats as hidden.
+- Featured credits ("Quincy Jones featuring James Ingram") from chart entries and imported file names are kept in file names and Plex titles; the artist record stays the main artist.
+- YouTube downloads go to the configured `music_videos_path`. The download adapter is created at import time, often before the database is up, and kept the `data/musicvideos` fallback for the life of the process; the path is now read for each download.
+- A torrent that never finds a peer (qBittorrent `metaDL`/`stalledDL` at 0%) is dropped after `indexer_torrent_dead_hours` (default 3) and the next release is tried, instead of waiting the full 24-hour stall timeout.
+- A release that already failed for a video is not grabbed again on the retry. It was matched by guid only, and The Pirate Bay gives the same torrent a new guid on every search, so the retry re-grabbed the dead torrent instead of moving on. Releases are now also matched by protocol and title (case and punctuation ignored).
+- The daily indexer search budget is now held across parallel workers. Each worker checked the budget before any of them had recorded its search, so a batch ran past it (119 searches against a budget of 100 in one day). A search is now recorded before it runs and turned away if it falls past the budget; retry searches after a failed grab count too, and the upgrade run checks the budget before each search. Searches started by hand still run.
+- A video with no YouTube upload now ends FAILED. Recording the failure inserted a download row without a URL into a NOT NULL column, the insert failed, and the video stayed in DOWNLOADING.
+- A video YouTube has no usable upload for rests as FAILED instead of staying WANTED, where it was searched again (and took a download slot) on every batch. It is put back to WANTED after `youtube_miss_retry_days` (default 7).
+- A low-resolution YouTube download (360p or less after an escalated attempt) no longer loses its file. The one MODERATE retry wrote to the same file name as the first download, so removing the copy that wasn't kept deleted the one that was, and the video was marked DOWNLOADED with no file (7 videos on one install). The retry now writes under its own name and, if it's at least as good, takes the original's name; otherwise it is removed.
+- A download never ends up pointing at a leftover yt-dlp format piece (`Song.f270.mp4`, video only, plays silent). A download killed mid-way leaves these next to the merged file, and the retry picked the newest file matching the name. Pieces and partial files are skipped, and yt-dlp's "has already been downloaded" line is read.
+- Videos whose download thread died are requeued. YouTube downloads run as threads in a Celery worker process; when the process is replaced (`worker_max_tasks_per_child`) or the container restarts, the video was left in DOWNLOADING for good. A task every 30 minutes puts a video back to WANTED after `stuck_download_reset_hours` (default 3) unless a Usenet/torrent job for it is active.
+- Scheduler health check: `SELECT 1` is wrapped in `text()` (SQLAlchemy 2 rejected the bare string, logging an error on every run).
+- A YouTube pick is recorded on the video: `official_music_video`, or `unofficial_clip` with the uploader's channel (previously an official pick left `video_type` empty).
+- The scheduled download task now honours `auto_download_schedule_enabled` (the static beat entry ignored it).
+- The library import drops leading track numbers and trailing release tags from file names and skips NAS snapshot/recycle folders (`@...`, `#...`). Releases whose name has a bracketed source phrase ("(Truth Or Dare 1991)") are rejected.
+
 Weekly Dependabot sweep (2026-11-16): consolidates five of seven open Dependabot PRs (#592, #593, #594, #596, #597). Zero open Dependabot/code-scanning alerts and pip-audit clean on all three requirements files before and after.
 
 ### Security

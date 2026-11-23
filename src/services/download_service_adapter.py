@@ -17,6 +17,7 @@ from src.services.unified_download_service import (
 )
 from src.utils.filename_cleanup import FilenameCleanup
 from src.utils.logger import get_logger
+from src.utils.music_matching import library_folder, library_stem
 
 logger = get_logger("mvidarr.download_adapter")
 
@@ -44,15 +45,37 @@ class DownloadServiceAdapter:
         )
 
     def _load_settings(self):
-        """Load settings that affect download behavior"""
-        self.music_videos_path = settings.get("music_videos_path", "data/musicvideos")
-        self.cookies_path = settings.get(
-            "youtube_cookies_path", "data/cookies/youtube_cookies.txt"
+        """Create the library folder if the database already knows it."""
+        try:
+            os.makedirs(self.music_videos_path, exist_ok=True)
+        except OSError as exc:
+            logger.warning(f"Could not create {self.music_videos_path}: {exc}")
+
+    # The module-level instance is created at import time, often before the
+    # database is up, so these are read from the settings on every use rather
+    # than once in __init__ (which silently fell back to data/musicvideos).
+    # A value set on the instance (tests) wins over the setting.
+    @property
+    def music_videos_path(self) -> str:
+        override = self.__dict__.get("_music_videos_path")
+        return override or settings.get("music_videos_path", "") or "data/musicvideos"
+
+    @music_videos_path.setter
+    def music_videos_path(self, value: str) -> None:
+        self.__dict__["_music_videos_path"] = value
+
+    @property
+    def cookies_path(self) -> str:
+        override = self.__dict__.get("_cookies_path")
+        return (
+            override
+            or settings.get("youtube_cookies_path", "")
+            or "data/cookies/youtube_cookies.txt"
         )
 
-        # Ensure paths exist
-        if not os.path.exists(self.music_videos_path):
-            os.makedirs(self.music_videos_path, exist_ok=True)
+    @cookies_path.setter
+    def cookies_path(self, value: str) -> None:
+        self.__dict__["_cookies_path"] = value
 
     def _restore_cookies_from_database(self):
         """Restore YouTube cookies from database to filesystem on startup"""
@@ -185,6 +208,23 @@ class DownloadServiceAdapter:
         except OSError:
             pass
 
+    @staticmethod
+    def _credit_for(video_id: Optional[int], artist: str) -> str:
+        """'A featuring B' for the file name when a chart entry or import knows it."""
+        if not video_id:
+            return artist
+        try:
+            from src.database.connection import get_db
+            from src.database.models import Video
+            from src.services.library_import_service import video_credit
+
+            with get_db() as session:
+                video = session.query(Video).filter(Video.id == video_id).first()
+                return video_credit(session, video, artist) if video else artist
+        except Exception as exc:  # noqa: BLE001 - naming must never fail a download
+            logger.warning(f"Could not look up the artist credit: {exc}")
+            return artist
+
     def add_music_video_download(
         self,
         artist: str,
@@ -202,10 +242,24 @@ class DownloadServiceAdapter:
         Maps to the new unified service while maintaining the same API
         """
         try:
-            # Create output directory
-            folder_name = FilenameCleanup.sanitize_folder_name(artist)
+            # Library layout: <music_videos_path>/<Artist>/<Artist> - <Title>.<ext>
+            # ("legacy" keeps the original <Artist>/<Title>.<ext> naming)
+            naming = settings.get("download_filename_format", "artist_title")
+            if naming == "legacy":
+                folder_name = FilenameCleanup.sanitize_folder_name(artist)
+                filename = None
+            else:
+                credit = self._credit_for(video_id, artist)
+                folder_name = library_folder(credit)
+                filename = library_stem(credit, title)
             output_path = os.path.join(self.music_videos_path, folder_name)
             os.makedirs(output_path, exist_ok=True)
+
+            # Usenet/torrent first unless this is a specific-format re-download
+            # (quality upgrade of a YouTube source) or the caller opted out
+            indexer_first = bool(
+                kwargs.get("indexer_first", True) and not format_string and video_id
+            )
 
             # Determine anti-detection level based on settings
             anti_detection_level = self._get_anti_detection_level()
@@ -222,6 +276,8 @@ class DownloadServiceAdapter:
                 output_path=output_path,
                 cookies_path=self._get_working_cookies_path(),
                 anti_detection=anti_detection_level,
+                filename=filename,
+                indexer_first=indexer_first,
             )
 
             # Start download using unified service
@@ -282,7 +338,13 @@ class DownloadServiceAdapter:
             download_entry = self.active_downloads[download_id]
 
             # Update status
-            if result.success:
+            if getattr(result, "handed_off", False):
+                download_entry["status"] = "handed_off"
+                download_entry["message"] = result.error_message
+                logger.info(
+                    f"Download {download_id} handed off: {result.error_message}"
+                )
+            elif result.success:
                 download_entry["status"] = "completed"
                 download_entry["file_path"] = result.file_path
                 download_entry["file_size"] = result.file_size

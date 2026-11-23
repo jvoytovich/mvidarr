@@ -61,6 +61,10 @@ class DownloadContext:
     proxy: Optional[str] = None
     rate_limit: Optional[str] = None
     anti_detection: AntiDetectionLevel = AntiDetectionLevel.MODERATE
+    # File name without extension ("Artist - Title"); falls back to title
+    filename: Optional[str] = None
+    # Try Usenet/torrent indexers (Prowlarr) before YouTube
+    indexer_first: bool = False
 
 
 @dataclass
@@ -73,6 +77,17 @@ class DownloadResult:
     duration: Optional[float] = None
     file_size: Optional[int] = None
     metadata: Optional[Dict] = None
+    # True when the video was handed to SABnzbd/qBittorrent instead
+    handed_off: bool = False
+
+
+def _write_thumbnail_enabled() -> bool:
+    try:
+        from src.services.settings_service import SettingsService
+
+        return SettingsService.get_bool("download_write_thumbnail", True)
+    except Exception:
+        return True
 
 
 class YtDlpManager:
@@ -367,18 +382,47 @@ class YouTubeDownloadStrategy(DownloadStrategy):
                             f"Low-res download ({height}p) with {current_level}; "
                             "retrying once with MODERATE for better formats"
                         )
+                        # The retry writes under its own name: with the same
+                        # output name yt-dlp reports (or overwrites) the same
+                        # file, and dropping the "discarded" copy deleted the
+                        # one being kept
+                        from dataclasses import replace
+
+                        stem = context.filename or context.title
+                        retry_stem = f"{stem}.mvidarr-retry"
                         retry = self._attempt_download(
-                            context, AntiDetectionLevel.MODERATE
+                            replace(context, filename=retry_stem),
+                            AntiDetectionLevel.MODERATE,
                         )
-                        if retry.success:
+                        separate = (
+                            retry.success
+                            and retry.file_path
+                            and retry.file_path != result.file_path
+                        )
+                        if separate:
                             retry_h = self._probe_video_height(retry.file_path)
                             if retry_h is None or retry_h >= height:
-                                # Retry is at least as good: keep it, drop the low-res original
-                                self._remove_file(result.file_path)
-                                retry.duration = time.time() - start_time
-                                return retry
+                                # Retry is at least as good: keep it under the
+                                # original's name, the low-res copy goes
+                                kept = retry.file_path
+                                name = os.path.basename(retry.file_path)
+                                if name.startswith(f"{retry_stem}."):
+                                    kept = self._swap_in_retry(
+                                        os.path.dirname(retry.file_path),
+                                        retry_stem,
+                                        stem,
+                                        retry.file_path,
+                                        result.file_path,
+                                    )
+                                else:
+                                    self._remove_file(result.file_path)
+                                if kept:
+                                    retry.file_path = kept
+                                    retry.duration = time.time() - start_time
+                                    return retry
                             # Retry is worse: drop it, keep the original
                             self._remove_file(retry.file_path)
+                        self._remove_stem_files(context.output_path, retry_stem)
                     result.duration = time.time() - start_time
                     return result
 
@@ -434,6 +478,48 @@ class YouTubeDownloadStrategy(DownloadStrategy):
             duration=time.time() - start_time,
         )
 
+    def _remove_stem_files(self, folder: str, stem: str) -> None:
+        """Best-effort removal of every file a discarded attempt wrote."""
+        try:
+            for name in os.listdir(folder):
+                if name.startswith(f"{stem}."):
+                    self._remove_file(os.path.join(folder, name))
+        except OSError:
+            pass
+
+    def _swap_in_retry(
+        self,
+        folder: str,
+        retry_stem: str,
+        stem: str,
+        retry_path: str,
+        original_path: Optional[str],
+    ) -> Optional[str]:
+        """
+        Give the retry's files (video, thumbnail, info.json) the original
+        name, then remove the low-res original. Returns the kept video path,
+        or None if the video could not be moved (the original is untouched).
+        """
+        ext = os.path.splitext(retry_path)[1]
+        final = os.path.join(folder, f"{stem}{ext}")
+        try:
+            os.replace(retry_path, final)
+        except OSError as exc:
+            logger.warning(f"Could not swap in the retry download: {exc}")
+            return None
+        try:
+            for name in os.listdir(folder):
+                if name.startswith(f"{retry_stem}."):
+                    os.replace(
+                        os.path.join(folder, name),
+                        os.path.join(folder, stem + name[len(retry_stem) :]),
+                    )
+        except OSError as exc:
+            logger.warning(f"Retry side files not renamed: {exc}")
+        if original_path and os.path.abspath(original_path) != os.path.abspath(final):
+            self._remove_file(original_path)
+        return final
+
     def _remove_file(self, file_path: Optional[str]) -> None:
         """Best-effort removal of a discarded download."""
         try:
@@ -463,7 +549,8 @@ class YouTubeDownloadStrategy(DownloadStrategy):
         cmd = [self.ytdlp_manager.current_executable]
 
         # Output template
-        output_template = os.path.join(context.output_path, f"{context.title}.%(ext)s")
+        output_stem = context.filename or context.title
+        output_template = os.path.join(context.output_path, f"{output_stem}.%(ext)s")
         cmd.extend(["-o", output_template])
 
         # Node runtime required for full YouTube format lists (HD/4K)
@@ -475,6 +562,10 @@ class YouTubeDownloadStrategy(DownloadStrategy):
 
         # Metadata options
         cmd.extend(["--write-info-json", "--embed-metadata", "--add-metadata"])
+        # "Artist - Title.jpg" next to the video is the poster for Plex's
+        # Personal Media agent (local assets)
+        if _write_thumbnail_enabled():
+            cmd.extend(["--write-thumbnail", "--convert-thumbnails", "jpg"])
 
         if force_player_client:
             cmd.extend(
@@ -611,13 +702,21 @@ class YouTubeDownloadStrategy(DownloadStrategy):
                 )
                 if cand.lower().endswith(media_exts):
                     return cand
-        # Prefer last media Destination (skip .info.json / part files)
+        from src.utils.filename_cleanup import already_downloaded_path, is_ytdlp_piece
+
+        # A file already on disk from an earlier run
+        for line in output_lines:
+            cand = already_downloaded_path(line)
+            if cand and cand.lower().endswith(media_exts) and not is_ytdlp_piece(cand):
+                return cand
+        # Prefer last media Destination (skip .info.json, part files and the
+        # per-format pieces of a merge)
         media_dests = []
         for line in output_lines:
             if "Destination:" in line:
                 cand = line.split("Destination:", 1)[1].strip()
                 low = cand.lower()
-                if low.endswith(media_exts) and not low.endswith(".part"):
+                if low.endswith(media_exts) and not is_ytdlp_piece(cand):
                     media_dests.append(cand)
         if media_dests:
             return media_dests[-1]
@@ -628,7 +727,11 @@ class YouTubeDownloadStrategy(DownloadStrategy):
         if os.path.exists(base_path):
             matches = []
             for file in os.listdir(base_path):
-                if file.startswith(stem) and file.lower().endswith(media_exts):
+                if (
+                    file.startswith(stem)
+                    and file.lower().endswith(media_exts)
+                    and not is_ytdlp_piece(file)
+                ):
                     matches.append(os.path.join(base_path, file))
             if matches:
                 matches.sort(key=lambda p: os.path.getmtime(p), reverse=True)
@@ -671,6 +774,8 @@ class UnifiedDownloadService:
         # Thread management
         self.active_downloads: Dict[int, threading.Thread] = {}
         self.download_callbacks: Dict[int, List[Callable]] = {}
+        self._download_slots: Optional[threading.BoundedSemaphore] = None
+        self._slots_lock = threading.Lock()
 
         logger.info("Unified Download Service initialized")
 
@@ -707,19 +812,133 @@ class UnifiedDownloadService:
         logger.info(f"Started download {download_id}: {context.title}")
         return download_id
 
+    def _run_callbacks(self, download_id: int, result: "DownloadResult") -> None:
+        for callback in self.download_callbacks.get(download_id, []):
+            try:
+                callback(download_id, result)
+            except Exception as e:
+                logger.error(f"Callback error for download {download_id}: {e}")
+
+    def _slots(self) -> threading.BoundedSemaphore:
+        """Process-wide cap on simultaneous yt-dlp downloads (download_max_concurrent)."""
+        if self._download_slots is None:
+            with self._slots_lock:
+                if self._download_slots is None:
+                    try:
+                        from src.services.settings_service import SettingsService
+
+                        limit = SettingsService.get_int(
+                            "download_max_concurrent",
+                            SettingsService.get_int("max_concurrent_downloads", 3),
+                        )
+                    except Exception:
+                        limit = 3
+                    self._download_slots = threading.BoundedSemaphore(max(1, limit))
+        return self._download_slots
+
+    def _resolve_url_for(self, video_id: int) -> Optional[str]:
+        """Find a YouTube URL for a video that was queued without one."""
+        if not video_id:
+            return None
+        from src.database.connection import get_db
+        from src.database.models import Video
+        from src.services.video_batch_service import resolve_video_url
+
+        with get_db() as session:
+            video = session.query(Video).filter(Video.id == video_id).first()
+            if not video:
+                return None
+            return resolve_video_url(video, session)
+
+    def _defer_to_wanted(self, video_id: int, reason: str) -> None:
+        """Put a claimed video back to WANTED (e.g. YouTube cooldown)."""
+        try:
+            from src.database.connection import get_db
+            from src.database.models import Video, VideoStatus
+
+            with get_db() as session:
+                video = session.query(Video).filter(Video.id == video_id).first()
+                if video and video.status != VideoStatus.DOWNLOADED:
+                    video.status = VideoStatus.WANTED
+                    session.commit()
+            logger.info(f"Video {video_id} back to WANTED: {reason}")
+        except Exception as e:
+            logger.error(f"Could not defer video {video_id}: {e}")
+
     def _execute_download(self, download_id: int, context: DownloadContext):
         """Execute download in background thread"""
         try:
             # Update database status
             self._update_database_status(context.video_id, DownloadStatus.DOWNLOADING)
 
+            # Usenet first, torrents second (Prowlarr -> SABnzbd/qBittorrent).
+            # A handed-off video is finished by the indexer poll task.
+            if context.indexer_first and context.video_id:
+                from src.services.indexers.indexer_service import try_indexer_first
+
+                handoff = try_indexer_first(context.video_id)
+                if handoff:
+                    self._run_callbacks(
+                        download_id,
+                        DownloadResult(
+                            success=False, handed_off=True, error_message=handoff
+                        ),
+                    )
+                    return
+
+            from dataclasses import replace
+
+            if not context.url:
+                url = self._resolve_url_for(context.video_id)
+                if not url:
+                    raise ValueError("No YouTube upload found for this video")
+                context = replace(context, url=url)
+
+            from src.services.youtube_cooldown import (
+                cooldown_remaining,
+                is_bot_check_error,
+                start_cooldown,
+            )
+
+            remaining = cooldown_remaining()
+            if remaining:
+                self._defer_to_wanted(
+                    context.video_id,
+                    f"YouTube cooldown ({int(remaining // 60)} min left)",
+                )
+                self._run_callbacks(
+                    download_id,
+                    DownloadResult(
+                        success=False,
+                        handed_off=True,
+                        error_message="Deferred: YouTube cooldown",
+                    ),
+                )
+                return
+
             # Find appropriate strategy
             strategy = self._get_strategy(context.url)
             if not strategy:
                 raise ValueError(f"No strategy available for URL: {context.url}")
 
-            # Execute download
-            result = strategy.download(context)
+            # Execute download (at most download_max_concurrent at a time)
+            with self._slots():
+                result = strategy.download(context)
+
+            # YouTube bot check / rate limit: pause all YouTube downloads and
+            # retry this video later instead of failing it
+            if (not result.success) and is_bot_check_error(result.error_message or ""):
+                start_cooldown(result.error_message or "bot check")
+                self._defer_to_wanted(context.video_id, "YouTube bot check")
+                self._run_callbacks(
+                    download_id,
+                    DownloadResult(
+                        success=False,
+                        handed_off=True,
+                        error_message="Deferred: YouTube bot check",
+                    ),
+                )
+                return
 
             # Dead YouTube URL (private / terminated / removed) → search official alternate once
             if (not result.success) and self._is_dead_youtube_error(
@@ -727,15 +946,14 @@ class UnifiedDownloadService:
             ):
                 alt = self._find_youtube_alternate(context)
                 if alt and alt != (context.url or ""):
-                    from dataclasses import replace
-
                     logger.info(
                         f"Dead YouTube URL for {context.title}; retrying with {alt}"
                     )
                     self._persist_video_url(context.video_id, alt)
                     context = replace(context, url=alt)
                     strategy = self._get_strategy(context.url) or strategy
-                    result = strategy.download(context)
+                    with self._slots():
+                        result = strategy.download(context)
 
             # Update database with result
             if result.success:
@@ -775,11 +993,7 @@ class UnifiedDownloadService:
                     )
 
             # Execute callbacks
-            for callback in self.download_callbacks.get(download_id, []):
-                try:
-                    callback(download_id, result)
-                except Exception as e:
-                    logger.error(f"Callback error for download {download_id}: {e}")
+            self._run_callbacks(download_id, result)
 
         except Exception as e:
             logger.error(f"Download {download_id} exception: {e}")
@@ -818,6 +1032,11 @@ class UnifiedDownloadService:
             "who has blocked it in your country",
             "copyright claim",
             "violating youtube",
+            # Age-gated uploads need a signed-in account; another upload of
+            # the same video usually is not gated (bb.py stalled on these)
+            "confirm your age",
+            "age-restricted",
+            "inappropriate for some users",
         )
         return any(m in low for m in markers)
 
@@ -896,7 +1115,15 @@ class UnifiedDownloadService:
 
         ytdlp = self.ytdlp_manager.current_executable
         candidates = []
-        for q in queries:
+        try:
+            from src.services.youtube_matcher import find_music_video
+
+            match = find_music_video(artist, title, exclude_ids=exclude, ytdlp=ytdlp)
+            if match:
+                candidates.append((1000, match["video_id"], match["title"]))
+        except Exception as e:
+            logger.debug(f"Matcher search failed for {context.title}: {e}")
+        for q in queries if not candidates else []:
             try:
                 proc = subprocess.run(
                     [
@@ -1061,6 +1288,12 @@ class UnifiedDownloadService:
                     session.commit()
         except Exception as e:
             logger.error(f"Database success update failed: {e}", exc_info=True)
+            return
+
+        # Ask Plex to scan just the folder the file landed in
+        from src.services.plex_music_video_service import notify_file_added
+
+        notify_file_added(result.file_path)
 
     def _update_database_failure(self, video_id: int, error_message: str) -> bool:
         """Update database on failed download.
@@ -1122,7 +1355,9 @@ class UnifiedDownloadService:
                             artist_id=video.artist_id,
                             video_id=video_id,
                             title=video.title,
-                            original_url=video.url,
+                            # NOT NULL column; a video YouTube found no upload
+                            # for has no URL at all
+                            original_url=video.url or video.youtube_url or "",
                             status="failed",
                             error_message=error_message,
                             last_error=error_message,

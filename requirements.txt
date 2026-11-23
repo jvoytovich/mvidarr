@@ -90,3 +90,4 @@ humanize==4.16.0
 # Video processing (legacy support)
 yt-dlp>=2026.8.19
 bgutil-ytdlp-pot-provider==2.0.0  # yt-dlp plugin for YouTube PO token bot detection bypass
+ytmusicapi==1.12.4  # YouTube Music search: marks official music videos (OMV)

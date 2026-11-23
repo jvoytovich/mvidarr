@@ -269,6 +269,16 @@ async def scheduled_jobs(request: Request, user=Depends(require_authentication))
 # =====================================
 
 
+@frontend_router.get("/lists", response_class=HTMLResponse, name="frontend_lists")
+async def lists_page(request: Request, user=Depends(require_authentication)):
+    """Chart lists, indexer grabs and Plex library status"""
+    try:
+        return await template_routes.lists(request)
+    except Exception as e:
+        logger.error(f"Error rendering lists page: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load lists page")
+
+
 @frontend_router.get(
     "/youtube-playlists", response_class=HTMLResponse, name="youtube_playlists"
 )

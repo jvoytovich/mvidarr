@@ -558,14 +558,24 @@ class YouTubeDownloadEngine:
         self, template: str, output_lines: List[str]
     ) -> Optional[str]:
         """Find actual downloaded file"""
+        from src.utils.filename_cleanup import already_downloaded_path, is_ytdlp_piece
+
         # Look for destination in output, prioritizing video files
         video_extensions = [".mp4", ".webm", ".mkv", ".avi", ".mov"]
         destinations = []
 
         for line in output_lines:
+            if "Merging formats into" in line:
+                merged = line.split("Merging formats into", 1)[1].strip().strip("\"'")
+                if os.path.exists(merged):
+                    return merged
+            done = already_downloaded_path(line)
+            if done and not is_ytdlp_piece(done) and os.path.exists(done):
+                return done
             if "Destination:" in line:
                 dest = line.split("Destination:")[1].strip()
-                destinations.append(dest)
+                if not is_ytdlp_piece(dest):
+                    destinations.append(dest)
 
         # If we have multiple destinations, prioritize video files that actually exist
         if destinations:
@@ -585,9 +595,14 @@ class YouTubeDownloadEngine:
             video_extensions = [".mp4", ".webm", ".mkv", ".avi", ".mov"]
             found_files = []
 
-            # Strategy 1: Exact match with base_name
+            # Strategy 1: Exact match with base_name (never a leftover
+            # per-format piece such as "Song.f137.mp4", which may be silent)
             for file in os.listdir(base_dir):
-                if file.startswith(base_name) and not file.endswith(".info.json"):
+                if (
+                    file.startswith(base_name)
+                    and not file.endswith(".info.json")
+                    and not is_ytdlp_piece(file)
+                ):
                     found_files.append(file)
 
             # Strategy 2: If no exact match, try fuzzy matching (handle yt-dlp adding prefixes)
@@ -599,7 +614,11 @@ class YouTubeDownloadEngine:
                     # Try matching on the last part (actual title)
                     core_title = title_parts[-1].strip()
                     for file in os.listdir(base_dir):
-                        if core_title in file and not file.endswith(".info.json"):
+                        if (
+                            core_title in file
+                            and not file.endswith(".info.json")
+                            and not is_ytdlp_piece(file)
+                        ):
                             found_files.append(file)
 
             # Strategy 3: Last resort - get most recent video file (including .temp files)
@@ -612,8 +631,8 @@ class YouTubeDownloadEngine:
                     if any(
                         file.endswith(ext) for ext in video_extensions
                     ) or file.endswith(".temp.mp4"):
-                        # Only exclude info.json
-                        if not file.endswith(".info.json"):
+                        # Exclude info.json and leftover per-format pieces
+                        if not file.endswith(".info.json") and not is_ytdlp_piece(file):
                             file_size = os.path.getsize(full_path)
                             file_mtime = os.path.getmtime(full_path)
                             video_files.append((file, file_mtime, file_size, full_path))

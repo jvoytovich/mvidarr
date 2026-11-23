@@ -75,6 +75,76 @@ def claim_video_for_download(video_id: int) -> bool:
         return False
 
 
+YOUTUBE_MISS_KEY = "youtube_miss_at"
+
+
+def retry_youtube_misses(days: float = 7) -> List[int]:
+    """
+    Put FAILED videos back to WANTED when YouTube had no usable upload for
+    them more than `days` ago: an upload may have appeared since.
+    """
+    from datetime import timedelta
+
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    ids = []
+    with get_db() as session:
+        failed = session.query(Video).filter(Video.status == VideoStatus.FAILED)
+        for video in failed:
+            meta = (
+                video.video_metadata if isinstance(video.video_metadata, dict) else {}
+            )
+            stamp = meta.get(YOUTUBE_MISS_KEY)
+            try:
+                missed = datetime.fromisoformat(stamp) if stamp else None
+            except (TypeError, ValueError):
+                missed = None
+            if missed and missed < cutoff:
+                video.status = VideoStatus.WANTED
+                ids.append(video.id)
+        if ids:
+            session.commit()
+            logger.info(f"Searching YouTube again for {len(ids)} video(s): {ids}")
+    return ids
+
+
+def reset_stuck_downloads(hours: float = 3) -> List[int]:
+    """
+    Put videos back to WANTED that have sat in DOWNLOADING for `hours`.
+
+    YouTube downloads run as threads inside a Celery worker process. When
+    that process is replaced (worker_max_tasks_per_child) or the container
+    restarts, the threads die without a word and the video stays in
+    DOWNLOADING for good. A video handed to SABnzbd/qBittorrent keeps its
+    status while the grab is active, so those are left alone.
+    """
+    from datetime import timedelta
+
+    from src.database.models import IndexerGrab
+    from src.services.indexers.indexer_service import ACTIVE_STATES
+
+    cutoff = datetime.utcnow() - timedelta(hours=hours)
+    with get_db() as session:
+        grabbed = session.query(IndexerGrab.video_id).filter(
+            IndexerGrab.status.in_(ACTIVE_STATES)
+        )
+        stuck = (
+            session.query(Video)
+            .filter(Video.status == VideoStatus.DOWNLOADING)
+            .filter(Video.updated_at < cutoff)
+            .filter(~Video.id.in_(grabbed))
+            .all()
+        )
+        ids = [video.id for video in stuck]
+        for video in stuck:
+            video.status = VideoStatus.WANTED
+        if ids:
+            session.commit()
+            logger.warning(
+                f"Reset {len(ids)} video(s) stuck in DOWNLOADING for {hours} h: {ids}"
+            )
+    return ids
+
+
 def claim_video_for_redownload(video_id: int) -> bool:
     """Atomically claim a video for (re)download from any status except
     DOWNLOADING itself (#377).
@@ -184,6 +254,20 @@ def _is_imvdb_placeholder(url: str) -> bool:
     return "imvdb.com/video/" in url
 
 
+def _indexer_will_search(video, session) -> bool:
+    """True when the indexer step (Prowlarr) will look for this video first."""
+    try:
+        from src.services.indexers.indexer_service import IndexerConfig, should_search
+
+        config = IndexerConfig()
+        if not config.usable:
+            return False
+        ok, _ = should_search(session, video, config, "wanted")
+        return ok
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def resolve_video_url(video, session, timeout: int = 30) -> Optional[str]:
     """
     Helper function to resolve video URL using yt-dlp search
@@ -212,46 +296,74 @@ def resolve_video_url(video, session, timeout: int = 30) -> Optional[str]:
         if not video.youtube_url.endswith("?v="):
             return video.youtube_url
 
+    artist_name = str(video.artist.name) if video.artist else ""
+    video_title = str(video.title) if video.title is not None else ""
+    if not artist_name or not video_title:
+        return None
     try:
-        artist_name = video.artist.name if video.artist else "Unknown Artist"
-        # Ensure title is a string (fix for integer title issue)
-        video_title = str(video.title) if video.title is not None else "Unknown"
-        search_query = f"{artist_name} {video_title}"
-        logger.info(f"Searching for video URL: {search_query}")
+        from src.services.youtube_matcher import find_music_video
 
-        # Use yt-dlp to search YouTube
-        cmd = [
-            get_ytdlp_path(),  # Use the best available version
-            "--dump-json",
-            "--no-download",
-            "--playlist-items",
-            "1",
-            f"ytsearch1:{search_query}",
-        ]
-
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-
-        if result.returncode == 0 and result.stdout:
-            video_info = json.loads(result.stdout.strip())
-            resolved_url = video_info.get("webpage_url") or video_info.get("url")
-
-            if resolved_url:
-                # Update video with resolved URL
-                video.url = resolved_url
-                if "id" in video_info:
-                    video.youtube_id = video_info["id"]
-                session.commit()
-                logger.info(f"Resolved video URL for '{video.title}': {resolved_url}")
-                return resolved_url
-            else:
-                logger.warning(f"No URL found in video info for '{video.title}'")
-        else:
-            logger.error(f"yt-dlp search failed for '{search_query}': {result.stderr}")
-
-    except subprocess.TimeoutExpired:
-        logger.error(f"yt-dlp search timed out for '{search_query}'")
+        exclude = []
+        if isinstance(video.video_metadata, dict):
+            exclude = video.video_metadata.get("rejected_youtube_ids") or []
+        match = find_music_video(
+            artist_name, video_title, exclude_ids=exclude, timeout=timeout
+        )
+        if not match:
+            logger.warning(
+                f"No usable YouTube upload for {artist_name} - {video_title}"
+            )
+            # Remembered so the video can rest as FAILED and be searched
+            # again later (retry_youtube_misses), not on every batch
+            metadata = (
+                dict(video.video_metadata)
+                if isinstance(video.video_metadata, dict)
+                else {}
+            )
+            metadata[YOUTUBE_MISS_KEY] = datetime.utcnow().isoformat()
+            video.video_metadata = metadata
+            session.commit()
+            return None
+        video.url = match["url"]
+        video.youtube_url = match["url"]
+        try:
+            # youtube_id is unique: another row may already own this upload
+            taken = (
+                session.query(Video.id)
+                .filter(Video.youtube_id == match["video_id"], Video.id != video.id)
+                .first()
+            )
+            if not taken:
+                video.youtube_id = match["video_id"]
+        except Exception:  # noqa: BLE001
+            pass
+        # Record the choice: Plex and the upgrade search read video_type, and
+        # an unofficial clip's summary names who uploaded it
+        if match["kind"] == "unofficial" and not video.video_type:
+            video.video_type = "unofficial_clip"
+            metadata = (
+                dict(video.video_metadata)
+                if isinstance(video.video_metadata, dict)
+                else {}
+            )
+            if match.get("channel"):
+                metadata["uploader"] = match["channel"]
+                video.video_metadata = metadata
+        elif match["kind"] == "official" and video.video_type in (
+            None,
+            "",
+            "unofficial_clip",
+        ):
+            video.video_type = "official_music_video"
+        session.commit()
+        logger.info(f"Resolved video URL for '{video.title}': {match['url']}")
+        return match["url"]
     except Exception as e:
         logger.error(f"Error resolving video URL for '{video.title}': {e}")
+        try:
+            session.rollback()
+        except Exception:  # noqa: BLE001
+            pass
 
     return None
 
@@ -348,10 +460,24 @@ def download_all_wanted_videos_internal(
                         failed_count += 1
                         continue
 
-                    # Resolve video URL using helper function
-                    video_url = resolve_video_url(video, session)
+                    # Usenet/torrent first: the download thread searches the
+                    # indexers and only resolves a YouTube URL if that fails
+                    indexer_first = _indexer_will_search(video, session)
+                    if indexer_first:
+                        video_url = video.url or video.youtube_url or ""
+                    else:
+                        video_url = resolve_video_url(video, session)
 
-                    if not video_url:
+                    if not video_url and not indexer_first:
+                        # YouTube had no usable upload: FAILED, not left
+                        # WANTED, or the same video is searched again (and
+                        # takes a slot) every batch. retry_youtube_misses()
+                        # puts it back after a while. A search that errored
+                        # leaves no mark and the video stays WANTED.
+                        meta = video.video_metadata
+                        if isinstance(meta, dict) and meta.get(YOUTUBE_MISS_KEY):
+                            video.status = VideoStatus.FAILED
+                            session.commit()
                         results.append(
                             {
                                 "video_id": video_id,

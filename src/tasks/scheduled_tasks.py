@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional
 
 from celery import Task
 from celery.utils.log import get_task_logger
+from sqlalchemy import text
 
 from src.database.connection import get_db
 from src.database.models import Artist, Download, ScheduledJob, Video, VideoStatus
@@ -249,6 +250,19 @@ def scheduled_downloads_task(**kwargs) -> Dict[str, Any]:
     logger.info("Starting scheduled downloads")
 
     try:
+        # The beat entry is static, so honour the on/off setting here. Settings
+        # are cached per worker process; read the current value.
+        SettingsService.reload_cache()
+        if not SettingsService.get_bool("auto_download_schedule_enabled", True):
+            logger.info("Scheduled downloads are turned off")
+            return {
+                "success": True,
+                "message": "Scheduled downloads are turned off",
+                "queued": 0,
+                "failed": 0,
+                "execution_time": 0,
+            }
+
         # Get settings
         max_downloads = SettingsService.get_int("auto_download_max_videos", 50)
         max_concurrent = SettingsService.get_int("download_max_concurrent", 3)
@@ -457,7 +471,7 @@ def scheduler_health_check_task(**kwargs) -> Dict[str, Any]:
         try:
             with get_db() as db:
                 # Simple query to verify DB connection
-                db.execute("SELECT 1")
+                db.execute(text("SELECT 1"))
                 health_status["database_connected"] = True
 
                 # Calculate recent job success rate

@@ -385,6 +385,12 @@ from src.api.fastapi.lidarr import router as lidarr_router
 
 app.include_router(lidarr_router)
 
+# *arr Router - indexers (Prowlarr/SABnzbd/qBittorrent), Plex Music Videos
+# library, chart lists, in-place library import
+from src.api.fastapi.arr import router as arr_router
+
+app.include_router(arr_router)
+
 # Health Check Router - Comprehensive Production Health Monitoring
 from src.api.fastapi.health import health_router
 from src.api.fastapi.maintenance import page_router as maintenance_page_router
