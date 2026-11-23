@@ -180,6 +180,48 @@ def searches_today(session) -> int:
     )
 
 
+def _reserve_search(
+    video_id: int, query: str, purpose: str, config: "IndexerConfig", enforce: bool
+) -> Optional[int]:
+    """
+    Record a search before it runs, so parallel workers count it at once.
+
+    Several Celery processes search at the same time, and each used to check
+    the daily budget before any of them had recorded its search, so a batch
+    could run well past the budget. The row is written first; then the rows
+    of today up to and including this one are counted, and a search past the
+    budget is marked "budget" and not run. Returns the row id, or None when
+    the budget is used.
+    """
+    with get_db() as session:
+        record = IndexerSearch(
+            video_id=video_id, query=query[:500], purpose=purpose, outcome="searching"
+        )
+        session.add(record)
+        session.commit()
+        if enforce:
+            used = (
+                session.query(func.count(IndexerSearch.id))
+                .filter(IndexerSearch.created_at >= _day_start())
+                .filter(IndexerSearch.outcome != "budget")
+                .filter(IndexerSearch.id <= record.id)
+                .scalar()
+                or 0
+            )
+            if used > config.daily_budget or _limited_until_tomorrow(session):
+                record.outcome = "budget"
+                session.commit()
+                return None
+        return record.id
+
+
+def budget_left(config: "IndexerConfig") -> bool:
+    with get_db() as session:
+        return searches_today(session) < config.daily_budget and not (
+            _limited_until_tomorrow(session)
+        )
+
+
 def _limited_until_tomorrow(session) -> bool:
     """An indexer limit hit today stops searching until the UTC day rolls over."""
     return (
@@ -243,9 +285,16 @@ def _tried_releases(session, video_id: int):
 
 
 def search_video(
-    video_id: int, purpose: str = "wanted", config: Optional[IndexerConfig] = None
+    video_id: int,
+    purpose: str = "wanted",
+    config: Optional[IndexerConfig] = None,
+    enforce_budget: bool = True,
 ) -> List[ScoredRelease]:
-    """Search Prowlarr for one video and record the search. Returns all scored releases."""
+    """
+    Search Prowlarr for one video and record the search. Returns all scored
+    releases, or [] without searching when the daily budget is used
+    (enforce_budget=False for a search a person started by hand).
+    """
     config = config or IndexerConfig()
     with get_db() as session:
         video = session.query(Video).filter(Video.id == video_id).first()
@@ -255,8 +304,12 @@ def search_video(
         title = video.title or ""
         exclude, exclude_keys = _tried_releases(session, video_id)
     query = search_query(artist, title)
-    record = IndexerSearch(video_id=video_id, query=query[:500], purpose=purpose)
+    record_id = _reserve_search(video_id, query, purpose, config, enforce_budget)
+    if record_id is None:
+        logger.info(f"Indexer search for video {video_id} skipped: budget used")
+        return []
     scored: List[ScoredRelease] = []
+    result: Dict = {}
     try:
         releases = config.prowlarr().search(query)
         scored = rank_releases(
@@ -272,19 +325,23 @@ def search_video(
             scored = [s for s in scored if s.release.protocol == "usenet"]
         if not config.sabnzbd():
             scored = [s for s in scored if s.release.protocol == "torrent"]
-        record.results_count = len(releases)
-        record.accepted_count = sum(1 for s in scored if s.accepted)
-        record.outcome = "found" if record.accepted_count else "no_match"
+        accepted = sum(1 for s in scored if s.accepted)
+        result = {
+            "results_count": len(releases),
+            "accepted_count": accepted,
+            "outcome": "found" if accepted else "no_match",
+        }
     except ProwlarrLimitError as exc:
-        record.outcome = "limit"
-        record.error = str(exc)
+        result = {"outcome": "limit", "error": str(exc)}
     except (ProwlarrError, requests.RequestException) as exc:
-        record.outcome = "error"
-        record.error = str(exc)[:1000]
+        result = {"outcome": "error", "error": str(exc)[:1000]}
         logger.warning(f"Prowlarr search failed for {query!r}: {exc}")
     with get_db() as session:
-        session.add(record)
-        session.commit()
+        record = session.get(IndexerSearch, record_id)
+        if record is not None:
+            for key, value in result.items():
+                setattr(record, key, value)
+            session.commit()
     return scored
 
 
@@ -815,6 +872,9 @@ def search_upgrades(config: Optional[IndexerConfig] = None) -> Dict:
             return stats
         ids = upgrade_candidates(session, config, min(config.upgrade_per_day, room))
     for video_id in ids:
+        if not budget_left(config):
+            stats["skipped"] = "daily search budget used"
+            break
         stats["searched"] += 1
         scored = search_video(video_id, "upgrade", config)
         for candidate in [s for s in scored if s.accepted][:2]:

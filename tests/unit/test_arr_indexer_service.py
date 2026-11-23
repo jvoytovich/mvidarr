@@ -353,3 +353,58 @@ def test_release_key_ignores_case_and_punctuation():
     assert release_key("usenet", "Madonna-Vogue") != release_key(
         "torrent", "Madonna-Vogue"
     )
+
+
+def test_budget_holds_when_workers_check_before_anyone_has_searched(env):
+    """Parallel workers all pass should_search; only the budget's worth search."""
+    set_settings(indexer_max_searches_per_day=2)
+    session = env["db"]()
+    artist = session.query(Artist).one()
+    others = [
+        Video(artist_id=artist.id, title=t, status=VideoStatus.WANTED)
+        for t in ("Frozen", "Music", "Hung Up")
+    ]
+    session.add_all(others)
+    session.commit()
+    ids = [env["video_id"]] + [v.id for v in others]
+    config = svc.IndexerConfig()
+    assert all(
+        svc.should_search(session, session.get(Video, i), config)[0] for i in ids
+    )
+    session.close()
+
+    for video_id in ids:  # each worker searches after its own check
+        svc.search_video(video_id, "wanted", config)
+
+    assert len(env["prowlarr"].queries) == 2
+    session = env["db"]()
+    outcomes = [
+        s.outcome for s in session.query(IndexerSearch).order_by(IndexerSearch.id)
+    ]
+    assert outcomes.count("budget") == 2
+    assert svc.searches_today(session) == 2
+    # A video turned away by the budget is not "searched recently"
+    assert svc.should_search(session, session.get(Video, ids[-1]), config) == (
+        False,
+        "daily search budget used",
+    )
+    session.close()
+
+    # A search started by hand still runs
+    svc.search_video(ids[-1], "wanted", config, enforce_budget=False)
+    assert len(env["prowlarr"].queries) == 3
+
+
+def test_upgrade_run_stops_at_the_budget(env, monkeypatch):
+    set_settings(indexer_max_searches_per_day=3, indexer_upgrades_per_day=10)
+    monkeypatch.setattr(svc, "upgrade_candidates", lambda s, c, limit: [1, 2, 3, 4, 5])
+    monkeypatch.setattr(svc, "search_video", lambda *a, **k: [])
+    calls = []
+
+    def fake_budget_left(config):
+        calls.append(1)
+        return len(calls) <= 2
+
+    monkeypatch.setattr(svc, "budget_left", fake_budget_left)
+    stats = svc.search_upgrades()
+    assert stats["searched"] == 2 and stats["skipped"] == "daily search budget used"

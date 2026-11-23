@@ -36,8 +36,11 @@ Everything here is off until you turn it on in **Settings > Services**.
    The Pirate Bay, give the same torrent a new guid on every search). When none is left, the video goes back
    to WANTED and the next download run uses **YouTube**.
 
-Searches are budgeted (`indexer_max_searches_per_day`, default 150) and a
-video is not searched again for 14 days. An HTTP 429 from Prowlarr stops
+Searches are budgeted (`indexer_max_searches_per_day`, default 150, counting
+wanted, upgrade and retry searches together) and a video is not searched again
+for 14 days. Each search is recorded before it runs, so parallel download
+workers can't overrun the budget; a search a person starts by hand from the
+Search button always runs and counts toward it. An HTTP 429 from Prowlarr stops
 searching until the next UTC day.
 
 ### YouTube, the fallback

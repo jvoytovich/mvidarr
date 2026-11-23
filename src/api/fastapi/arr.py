@@ -182,7 +182,8 @@ async def indexer_search(
             if not video:
                 raise HTTPException(status_code=404, detail="Video not found")
             purpose = "upgrade" if video.local_path else "wanted"
-        scored = search_video(video_id, purpose, config)
+        # A search started by hand runs even when the daily budget is used
+        scored = search_video(video_id, purpose, config, enforce_budget=False)
         grabbed = None
         if body.grab:
             accepted = [s for s in scored if s.accepted]
